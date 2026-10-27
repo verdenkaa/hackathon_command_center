@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tmp/
+.pip-cache/
+backend/tests/.tmp/
+
+# Node / frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+
+# Runtime data (kept outside git)
+data/
+
+# Secrets and local env
+.env
+*.local
+
+# DSH harness internals (skills)
+.dsh/
+
+# Логи и артефакты БД (на случай stray-файлов вне data/)
+*.log
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+
+# Editors / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
