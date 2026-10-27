@@ -111,8 +111,54 @@ export interface Recommendation {
   trigger: string
   summary: string
   content: string
+  request_context: AiPreview | null
   excluded: boolean
   created_at: string
+}
+
+export interface AiPreview {
+  mode: 'mock'
+  provider: string
+  prompt: string
+  trigger: string
+  question: string
+  snapshot: Record<string, unknown>
+}
+
+export interface TelegramMessage {
+  id: number
+  project_id: number | null
+  event_type: string
+  text: string
+  mentions: string[]
+  mode: string
+  created_at: string
+}
+
+export interface SandboxCheck {
+  name: string
+  title: string
+  status: 'passed' | 'failed'
+  detail: string
+  duration_ms: number
+}
+
+export interface SandboxRun {
+  id: number
+  scenario: string
+  status: 'ok' | 'error'
+  logs: string[]
+  checks: SandboxCheck[]
+  duration_ms: number
+  created_at: string
+}
+
+export interface SandboxWorkspace {
+  project_id: number | null
+  project_name: string | null
+  state: string | null
+  counts: Record<string, number>
+  team: {user_id:number; login:string; display_name:string; role:string; active:boolean}[]
 }
 
 export interface UserInfo {
@@ -259,7 +305,7 @@ export const api = {
   dashboard: (): Promise<DashboardKpi> => request(`/api/v1/projects/${pid()}/dashboard`),
 
   tasks: (): Promise<Task[]> => request(`/api/v1/projects/${pid()}/tasks`),
-  createTask: (payload: Record<string, unknown>) =>
+  createTask: (payload: Record<string, unknown>): Promise<Task> =>
     request(`/api/v1/projects/${pid()}/tasks`, { method: 'POST', body: JSON.stringify(payload) }),
   patchTask: (taskId: number, payload: Record<string, unknown>, version: number) =>
     request(`/api/v1/tasks/${taskId}`, { method: 'PATCH', body: JSON.stringify({ ...payload, version }) }),
@@ -299,8 +345,10 @@ export const api = {
   aiSettings: (): Promise<AiSettings> => request(`/api/v1/projects/${pid()}/ai/settings`),
   patchAiSettings: (payload: Record<string, unknown>) =>
     request(`/api/v1/projects/${pid()}/ai/settings`, { method: 'PATCH', body: JSON.stringify(payload) }),
-  runAi: () => request(`/api/v1/projects/${pid()}/ai/run`, { method: 'POST', body: JSON.stringify({ trigger: 'manual' }) }),
+  previewAi: (question = '', trigger = 'manual'): Promise<AiPreview> => request(`/api/v1/projects/${pid()}/ai/preview`, { method: 'POST', body: JSON.stringify({trigger, question}) }),
+  runAi: (question = '', trigger = 'manual') => request(`/api/v1/projects/${pid()}/ai/run`, { method: 'POST', body: JSON.stringify({ trigger, question }) }),
   recommendations: (): Promise<Recommendation[]> => request(`/api/v1/projects/${pid()}/ai/recommendations`),
+  excludeRecommendation: (id: number) => request(`/api/v1/projects/${pid()}/ai/recommendations/${id}/exclude`, {method:'POST'}),
 
   notifications: (): Promise<Notification[]> => request('/api/v1/notifications'),
   readNotification: (id: number) => request(`/api/v1/notifications/${id}/read`, { method: 'POST' }),
@@ -317,7 +365,7 @@ export const api = {
     request(`/api/v1/admin/users/${id}/password-reset`, { method: 'POST', body: JSON.stringify({ new_password: newPassword }) }),
   deactivateUser: (id: number) => request(`/api/v1/admin/users/${id}/deactivate`, { method: 'POST' }),
   assignRole: (userId: number, role: string, projectId?: number | null) =>
-    request('/api/v1/admin/roles', { method: 'POST', body: JSON.stringify({ user_id: userId, role, project_id: projectId ?? null }) }),
+    request('/api/v1/admin/roles', { method: 'POST', body: JSON.stringify({ user_id: userId, role, project_id: role === 'admin' ? null : projectId ?? pid() }) }),
   roles: (): Promise<{ id: number; user_id: number; role: string; project_id: number | null }[]> =>
     request('/api/v1/admin/roles'),
   revokeRole: (id: number) => request(`/api/v1/admin/roles/${id}`, { method: 'DELETE' }),
@@ -332,9 +380,15 @@ export const api = {
   runJobs: () => request('/api/v1/admin/jobs/run', { method: 'POST' }),
 
   sandboxScenarios: (): Promise<Record<string, string>> => request('/api/v1/admin/sandbox/scenarios'),
-  sandboxRun: (scenario: string) =>
+  telegramMessages: (): Promise<TelegramMessage[]> => request(`/api/v1/admin/sandbox/telegram?project_id=${pid()}`),
+  sandboxWorkspace: (): Promise<SandboxWorkspace> => request('/api/v1/admin/sandbox/workspace'),
+  sandboxChecks: (): Promise<Record<string,string>> => request('/api/v1/admin/sandbox/checks'),
+  sandboxReset: (projectId: number): Promise<{status:string; archive_path:string; workspace:SandboxWorkspace}> =>
+    request('/api/v1/admin/sandbox/reset', {method:'POST',body:JSON.stringify({project_id:projectId,confirm:true})}),
+  sandboxTelegram: (projectId: number): Promise<TelegramMessage[]> => request('/api/v1/admin/sandbox/telegram?project_id=' + projectId),
+  sandboxRun: (scenario: string): Promise<SandboxRun> =>
     request('/api/v1/admin/sandbox/run', { method: 'POST', body: JSON.stringify({ scenario }) }),
-  sandboxRuns: (): Promise<{ id: number; scenario: string; status: string; logs: string[]; created_at: string }[]> =>
+  sandboxRuns: (): Promise<SandboxRun[]> =>
     request('/api/v1/admin/sandbox/runs'),
 
   completionVote: (action: 'complete' | 'reopen') =>

@@ -5,17 +5,15 @@ import Board from './Board'
 import { Incidents } from './Incidents'
 import { Analytics } from './Analytics'
 import { Admin } from './Admin'
-import { Sandbox } from './Sandbox'
 import { Settings } from './Settings'
 
-type Tab = 'board' | 'incidents' | 'analytics' | 'admin' | 'sandbox' | 'settings'
+type Tab = 'board' | 'incidents' | 'analytics' | 'admin' | 'settings'
 
 const TABS: { key: Tab; label: string }[] = [
   { key: 'board', label: 'Доска' },
   { key: 'incidents', label: 'Инциденты' },
   { key: 'analytics', label: 'Аналитика' },
   { key: 'admin', label: 'Админ' },
-  { key: 'sandbox', label: 'Песочница' },
   { key: 'settings', label: 'Настройки' },
 ]
 
@@ -25,6 +23,7 @@ export default function App() {
   const [tab, setTab] = useState<Tab>('board')
   const [projectId, setProjectId] = useState(currentProject())
   const [projects, setProjects] = useState<Project[]>([])
+  const [projectsLoaded, setProjectsLoaded] = useState(false)
   const [notifications, setNotifications] = useState<Notification[]>([])
   const [notifOpen, setNotifOpen] = useState(false)
 
@@ -33,7 +32,15 @@ export default function App() {
   }, [])
 
   const reloadProjects = useCallback(() => {
-    api.projects().then(setProjects).catch(() => {})
+    api.projects().then((items) => {
+      setProjects(items)
+      setProjectId((previous) => {
+        const next = items.some((p) => p.id === previous) ? previous : items[0]?.id ?? 0
+        setCurrentProject(next)
+        return next
+      })
+      setProjectsLoaded(true)
+    }).catch(() => {})
   }, [])
 
   useEffect(() => {
@@ -50,10 +57,22 @@ export default function App() {
   }, [me])
 
   if (loading) return <div style={{ padding: 24 }}>Загрузка…</div>
-  if (!me) return <Login onLogin={setMe} />
+  if (!me) return <Login onLogin={(user) => {
+    setTab('board')
+    setProjects([])
+    setProjectsLoaded(false)
+    setMe(user)
+  }} />
 
   const isAdmin = me.roles.some((r) => r.role === 'admin')
   const unread = notifications.filter((n) => !n.read_at).length
+
+  if (projectsLoaded && projects.length === 0 && !isAdmin) return (
+    <div className="card" style={{margin:24}}>
+      Нет доступных проектов. Попросите администратора назначить роль в проекте.
+      <button onClick={async () => { await api.logout(); setMe(null); setProjectsLoaded(false) }}>Выйти</button>
+    </div>
+  )
 
   function switchProject(id: number) {
     setCurrentProject(id)
@@ -164,10 +183,10 @@ export default function App() {
       <div style={{ marginTop: 12 }}>
         {tab === 'board' && <Board key={projectId} me={me} />}
         {tab === 'incidents' && <Incidents key={projectId} me={me} />}
-        {tab === 'analytics' && <Analytics key={projectId} />}
+        {tab === 'analytics' && <Analytics key={projectId} me={me} />}
         {tab === 'admin' && isAdmin && <Admin key={projectId} />}
-        {tab === 'sandbox' && isAdmin && <Sandbox key={projectId} onProjectsChanged={reloadProjects} />}
-        {tab === 'settings' && <Settings key={projectId} me={me} onProjectsChanged={reloadProjects} />}
+        {tab === 'settings' && <Settings key={projectId} me={me} onProjectsChanged={reloadProjects}
+          onOpenProject={(id, view) => {switchProject(id);setTab(view)}} />}
       </div>
     </div>
   )

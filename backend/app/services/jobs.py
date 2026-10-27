@@ -31,9 +31,12 @@ def cleanup_locks(db: Session) -> int:
     return len(expired)
 
 
-def check_overdue(db: Session) -> int:
+def check_overdue(db: Session, project_id: int | None = None) -> int:
     created = 0
-    projects = db.query(Project).filter(Project.state != "completed").all()
+    query = db.query(Project).filter(Project.state != "completed")
+    if project_id is not None:
+        query = query.filter(Project.id == project_id)
+    projects = query.all()
     now = utcnow()
     for project in projects:
         done_ids = {
@@ -64,12 +67,14 @@ def check_overdue(db: Session) -> int:
             notify_users(
                 db,
                 project_id=project.id,
-                user_ids=team(db),
+                user_ids=team(db, project.id),
                 ntype="task_overdue",
                 payload={"task_id": task.id, "title": task.title},
                 telegram_text=f"⏰ Просрочена задача: {task.title}",
             )
             created += 1
+            from app.services.ai import maybe_recommend
+            maybe_recommend(db, project.id, 'overdue')
         db.commit()
     return created
 
@@ -78,4 +83,16 @@ def run_all_jobs(db: Session) -> dict:
     return {
         "locks_cleaned": cleanup_locks(db),
         "overdue_notified": check_overdue(db),
+        'deadline_ai': check_deadline_ai(db),
     }
+
+
+def check_deadline_ai(db: Session) -> int:
+    from datetime import timedelta
+    from app.services.ai import maybe_recommend
+    now = utcnow()
+    projects = db.query(Project).filter(Project.state != 'completed', Project.deadline_msk > now,
+        Project.deadline_msk <= now + timedelta(hours=6)).all()
+    count = sum(int(maybe_recommend(db, p.id, 'deadline_6h')) for p in projects)
+    db.commit()
+    return count

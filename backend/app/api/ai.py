@@ -13,6 +13,14 @@ from app.services import ai as ai_svc
 router = APIRouter(tags=["ai"])
 
 
+@router.get('/projects/{project_id}/ai/preview')
+@router.post('/projects/{project_id}/ai/preview')
+def preview(project_id: int, body: AiRunRequest | None = None, db: Session = Depends(get_db),
+            _u: User = Depends(get_current_user)) -> dict:
+    request = body or AiRunRequest()
+    return ai_svc.preview_request(db, project_id, request.trigger, request.question)
+
+
 @router.get("/projects/{project_id}/ai/settings", response_model=AiSettingsOut)
 def get_settings(project_id: int, db: Session = Depends(get_db), _u=Depends(get_current_user)) -> AiSettingsOut:
     return AiSettingsOut.model_validate(ai_svc.get_settings(db, project_id))
@@ -26,7 +34,9 @@ def patch_settings(
     _u: User = Depends(require_captain_or_admin),
 ) -> AiSettingsOut:
     settings = ai_svc.get_settings(db, project_id)
-    updates = body.model_dump(exclude_unset=True)
+    updates = body.model_dump(exclude_unset=True, exclude_none=True)
+    if 'triggers' in updates and set(updates['triggers']) - set(ai_svc.DEFAULT_TRIGGERS):
+        raise api_error(422, 'VALIDATION_ERROR', 'Неизвестный триггер ИИ')
     for field, value in updates.items():
         setattr(settings, field, value)
     db.commit()
@@ -58,7 +68,7 @@ def run_recommendation(
     db: Session = Depends(get_db),
     _u=Depends(get_current_user),
 ) -> AiRecommendationOut:
-    rec = ai_svc.run_recommendation(db, project_id, body.trigger)
+    rec = ai_svc.run_recommendation(db, project_id, body.trigger, body.question)
     db.commit()
     db.refresh(rec)
     return AiRecommendationOut.model_validate(rec)

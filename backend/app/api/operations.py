@@ -86,7 +86,7 @@ def completion_vote(
         db.add(CompletionVote(project_id=project_id, user_id=user.id, action=body.action))
         db.commit()
 
-    captain_ids = set(notify_svc.captains(db))
+    captain_ids = set(notify_svc.captains(db, project_id))
     votes = {
         v.user_id
         for v in db.query(CompletionVote).filter(

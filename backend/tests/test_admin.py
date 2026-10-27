@@ -69,7 +69,7 @@ def test_last_admin_cannot_deactivate(client):
 def test_assign_and_revoke_role(client):
     login(client)
     client.post("/api/v1/admin/users", json={"login": "eve", "password": "eve-pass", "display_name": "Eve"})
-    r = client.post("/api/v1/admin/roles", json={"user_id": 2, "role": "captain"})
+    r = client.post("/api/v1/admin/roles", json={"user_id": 2, "role": "captain", "project_id": 1})
     assert r.status_code == 200
     assignment_id = r.json()["id"]
 

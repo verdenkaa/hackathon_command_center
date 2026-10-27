@@ -36,7 +36,7 @@ def test_ai_run_mock(client):
 def test_ai_settings_requires_captain(client):
     login(client)
     client.post("/api/v1/admin/users", json={"login": "p", "password": "p", "display_name": "P"})
-    client.post("/api/v1/admin/roles", json={"user_id": 2, "role": "participant"})
+    client.post("/api/v1/admin/roles", json={"user_id": 2, "role": "participant", "project_id": 1})
     login(client, login="p", password="p")
     r = client.patch("/api/v1/projects/1/ai/settings", json={"enabled": True})
     assert r.status_code == 403

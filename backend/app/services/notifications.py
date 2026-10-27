@@ -3,11 +3,11 @@ from __future__ import annotations
 
 from sqlalchemy.orm import Session
 
-from app.db.models import Notification, RoleAssignment, User
+from app.db.models import Notification, RoleAssignment, User, Role, TelegramDelivery
 from app.integrations.telegram import telegram_client
 
 
-def role_user_ids(db: Session, *roles: str) -> list[int]:
+def role_user_ids(db: Session, *roles: str, project_id: int | None = None) -> list[int]:
     rows = (
         db.query(RoleAssignment.user_id)
         .join(User, User.id == RoleAssignment.user_id)
@@ -15,6 +15,7 @@ def role_user_ids(db: Session, *roles: str) -> list[int]:
             RoleAssignment.revoked_at.is_(None),
             RoleAssignment.role.in_(roles),
             User.active.is_(True),
+            (RoleAssignment.project_id == project_id) | (RoleAssignment.role == Role.admin),
         )
         .distinct()
         .all()
@@ -22,12 +23,12 @@ def role_user_ids(db: Session, *roles: str) -> list[int]:
     return [r[0] for r in rows]
 
 
-def captains(db: Session) -> list[int]:
-    return role_user_ids(db, "captain", "admin")
+def captains(db: Session, project_id: int | None = None) -> list[int]:
+    return role_user_ids(db, "captain", "admin", project_id=project_id)
 
 
-def team(db: Session) -> list[int]:
-    return role_user_ids(db, "participant", "captain", "admin")
+def team(db: Session, project_id: int | None = None) -> list[int]:
+    return role_user_ids(db, "participant", "captain", "admin", project_id=project_id)
 
 
 def notify_users(
@@ -44,4 +45,6 @@ def notify_users(
         db.add(Notification(project_id=project_id, user_id=uid, type=ntype, payload=payload))
     db.flush()
     if telegram_text:
-        telegram_client.send(telegram_text, mention_usernames)
+        db.add(TelegramDelivery(project_id=project_id, event_type=ntype, text=telegram_text,
+                                mentions=mention_usernames or [], mode='mock'))
+        db.flush()

@@ -61,6 +61,7 @@ def test_document_lock_flow(client):
 def test_document_lock_conflict(client):
     login(client)
     client.post("/api/v1/admin/users", json={"login": "u2", "password": "p", "display_name": "U2"})
+    client.post('/api/v1/admin/roles', json={'user_id': 2, 'role': 'participant', 'project_id': 1})
     doc = client.post("/api/v1/projects/1/documents", json={"path": "b.md", "content": ""}).json()
     did = doc["id"]
 
@@ -71,3 +72,9 @@ def test_document_lock_conflict(client):
     r = u2.post(f"/api/v1/documents/{did}/lock")
     assert r.status_code == 409
     assert r.json()["error"]["code"] == "DOCUMENT_LOCKED"
+
+
+def test_document_cannot_escape_to_project_with_same_prefix(client):
+    login(client)
+    r = client.post('/api/v1/projects/1/documents', json={'path': '../10/escape.md', 'content': 'private'})
+    assert r.status_code == 422

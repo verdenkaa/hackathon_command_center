@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { api, UserInfo } from './api'
+import { api, UserInfo, currentProject } from './api'
 import { Badge, Field, Modal, fmtDate, useLoad } from './ui'
 
 type Section = 'users' | 'logins' | 'ip' | 'backups'
@@ -31,12 +31,13 @@ function Users() {
   const [roles, , reloadRoles] = useLoad<{ id: number; user_id: number; role: string; project_id: number | null }[]>(api.roles)
   const [createOpen, setCreateOpen] = useState(false)
 
-  const rolesOf = (id: number) => (roles ?? []).filter((r) => r.user_id === id)
+  const rolesOf = (id: number) => (roles ?? []).filter((r) => r.user_id === id && (r.role === 'admin' || r.project_id === currentProject()))
 
   return (
     <div>
       <div className="row" style={{ marginBottom: 10 }}>
         <button className="primary" onClick={() => setCreateOpen(true)}>+ Пользователь</button>
+        <span className="muted">Аккаунты общие. Участник и капитан — роли выбранного проекта; администратор — общий.</span>
       </div>
       {error && <div className="error">{error}</div>}
       <table>

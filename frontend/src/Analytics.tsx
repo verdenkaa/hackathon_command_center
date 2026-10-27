@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react'
-import { api, Analytics as AnalyticsData, Recommendation } from './api'
+import { api, Analytics as AnalyticsData, Recommendation, Me, currentProject } from './api'
+import { MockAi, AiRequestView } from './MockAi'
 import { Badge, BarList, LineChart, badgeForStatus, fmt, fmtDuration, fmtDate, useLoad } from './ui'
 
-export function Analytics() {
+export function Analytics({ me }: { me: Me }) {
   const [data, error, reload] = useLoad<AnalyticsData>(api.analytics)
   const [recs, , reloadRecs] = useLoad<Recommendation[]>(api.recommendations)
   const [msg, setMsg] = useState('')
+  const isCaptain = me.roles.some((r) => r.role === 'admin' || (r.role === 'captain' && r.project_id === currentProject()))
 
   useEffect(() => {
     const id = setInterval(reload, 5000)
@@ -122,20 +124,9 @@ export function Analytics() {
       <div className="card" style={{ marginTop: 16 }}>
         <div className="row" style={{ justifyContent: 'space-between' }}>
           <div className="section-title" style={{ margin: 0 }}>Рекомендации ИИ</div>
-          <button
-            className="small primary"
-            onClick={async () => {
-              try {
-                await api.runAi()
-                reloadRecs()
-              } catch (e) {
-                setMsg((e as Error).message)
-              }
-            }}
-          >
-            Запросить анализ
-          </button>
+          <Badge kind="blue">мок · без внешних запросов</Badge>
         </div>
+        <MockAi onRun={reloadRecs} />
         {msg && <div className="error" style={{ marginTop: 6 }}>{msg}</div>}
         <div className="grid" style={{ gap: 8, marginTop: 8 }}>
           {(recs ?? []).slice(0, 10).map((r) => (
@@ -145,6 +136,12 @@ export function Analytics() {
                 <span className="muted" style={{ fontSize: 11 }}>{r.trigger} · {fmtDate(r.created_at)}</span>
               </div>
               <div style={{ fontSize: 13, marginTop: 2 }}>{r.content}</div>
+              <div className="muted">{r.excluded ? 'Исключена из следующего контекста' : 'Может войти в контекст следующих запросов'}</div>
+              {isCaptain && <button className="small" onClick={async () => {
+                try { await api.excludeRecommendation(r.id); reloadRecs() }
+                catch (e) { setMsg((e as Error).message) }
+              }}>{r.excluded ? 'Вернуть в контекст' : 'Исключить из контекста'}</button>}
+              {r.request_context && <details><summary>Сохранённый запрос · {r.provider} · mock</summary><AiRequestView context={r.request_context}/></details>}
             </div>
           ))}
           {(recs ?? []).length === 0 && (

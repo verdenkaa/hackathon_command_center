@@ -1,6 +1,8 @@
 """Тесты дашборда."""
 from __future__ import annotations
 
+import pytest
+
 from tests.helpers import login
 
 
@@ -16,6 +18,25 @@ def test_dashboard_empty(client):
     assert body["total_tasks"] == 0
     assert body["progress_percent"] == 0.0
     assert body["project"]["name"] == "Hackathon"
+
+
+@pytest.mark.parametrize("endpoint", ["dashboard", "analytics"])
+def test_dashboard_timers_are_scoped_to_project(client, endpoint: str):
+    login(client)
+    project_id = client.post("/api/v1/projects", json={"name": "Other"}).json()["id"]
+    task = _create_task(client)
+    client.put(f"/api/v1/tasks/{task['id']}/assignees", json={
+        "assignees": [{"user_id": 1, "is_primary": True}],
+    })
+    assert client.post(f"/api/v1/tasks/{task['id']}/timer/start").status_code == 200
+    own = client.get(f"/api/v1/projects/1/{endpoint}").json()
+    other = client.get(f"/api/v1/projects/{project_id}/{endpoint}").json()
+    if endpoint == "analytics":
+        own, other = own["kpi"], other["kpi"]
+    assert own["active_timers"] == 1
+    assert own["active_participants"] == 1
+    assert other["active_timers"] == 0
+    assert other["active_participants"] == 0
 
 
 def test_dashboard_progress(client):

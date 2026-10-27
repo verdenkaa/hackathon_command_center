@@ -106,7 +106,7 @@ export function Incidents({ me }: { me: Me }) {
   )
 }
 
-function IncidentForm({
+export function IncidentForm({
   me, participants, tasks, modules, onClose, onCreated,
 }: {
   me: Me
@@ -128,6 +128,7 @@ function IncidentForm({
   const [taskSearch, setTaskSearch] = useState('')
   const [taskColumn, setTaskColumn] = useState('')
   const [onlyMine, setOnlyMine] = useState(false)
+  const [error, setError] = useState('')
 
   const openTasks = useMemo(
     () => tasks.filter((t) => !['done', 'realised', 'trashed'].includes(t.column_key)),

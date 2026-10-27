@@ -9,10 +9,6 @@ const PRIORITY_COLOR: Record<string, string> = {
   critical: '#f06464',
 }
 
-const COLUMN_KEYS = [
-  'backlog', 'todo', 'specification_review', 'in_progress', 'testing', 'review', 'done', 'realised', 'trashed',
-]
-
 export const LINK_LABELS: Record<string, string> = {
   blocked_by: 'заблокирована',
   after: 'после',
@@ -44,7 +40,7 @@ export default function Board({ me }: { me: Me }) {
   const [dash, setDash] = useState<DashboardKpi | null>(null)
   const [participants] = useLoad<Participant[]>(api.participants)
   const [modules] = useLoad<Module[]>(api.modules)
-  const [incidents] = useLoad<Incident[]>(api.incidents)
+  const [incidents, setIncidents] = useState<Incident[]>([])
   const [filterUser, setFilterUser] = useState<number | null>(null)
   const [filterTag, setFilterTag] = useState('')
   const [search, setSearch] = useState('')
@@ -54,10 +50,12 @@ export default function Board({ me }: { me: Me }) {
   const [error, setError] = useState('')
 
   const reload = useCallback(async () => {
-    const [c, t, d] = await Promise.all([api.columns(), api.tasks(), api.dashboard()])
+    const [c, t, d, i] = await Promise.all([api.columns(), api.tasks(), api.dashboard(), api.incidents()])
     setColumns(c)
     setTasks(t)
     setDash(d)
+    setIncidents(i)
+    setError('')
   }, [])
 
   useEffect(() => {
@@ -66,10 +64,11 @@ export default function Board({ me }: { me: Me }) {
 
   useEffect(() => {
     const id = setInterval(() => {
-      Promise.all([api.tasks(), api.dashboard()])
-        .then(([t, d]) => {
+      Promise.all([api.tasks(), api.dashboard(), api.incidents()])
+        .then(([t, d, i]) => {
           setTasks(t)
           setDash(d)
+          setIncidents(i)
         })
         .catch(() => {})
     }, 1000)
@@ -181,6 +180,7 @@ export default function Board({ me }: { me: Me }) {
                 <TaskCard
                   key={task.id}
                   task={task}
+                  columns={columns}
                   dragging={draggingId === task.id}
                   blocked={blockedIds.has(task.id)}
                   affected={affectedIds.has(task.id)}
@@ -214,6 +214,7 @@ export default function Board({ me }: { me: Me }) {
 
       {createOpen && (
         <TaskForm
+          columns={columns}
           onClose={() => setCreateOpen(false)}
           onCreated={async () => {
             setCreateOpen(false)
@@ -227,12 +228,13 @@ export default function Board({ me }: { me: Me }) {
           <div className="side-backdrop" onClick={() => setSelectedId(null)} />
           <div className="side-panel">
             <TaskPanel
+              key={selected.id}
               task={selected}
               tasks={tasks}
               participants={participants ?? []}
               modules={modules ?? []}
               columns={columns}
-              isCaptain={me.roles.some((r) => r.role === 'captain' || r.role === 'admin')}
+              isCaptain={me.roles.some((r) => r.role === 'admin' || (r.role === 'captain' && r.project_id === selected.project_id))}
               onChange={async () => {
                 reload()
               }}
@@ -254,8 +256,9 @@ function Kpi({ label, value, warn }: { label: string; value: string | number; wa
   )
 }
 
-function TaskCard({ task, dragging, blocked, affected, onOpen, onMove, onTimer, onDragStart, onDragEnd }: {
+export function TaskCard({ task, columns, dragging, blocked, affected, onOpen, onMove, onTimer, onDragStart, onDragEnd }: {
   task: Task
+  columns: Column[]
   dragging: boolean
   blocked: boolean
   affected: boolean
@@ -321,15 +324,15 @@ function TaskCard({ task, dragging, blocked, affected, onOpen, onMove, onTimer, 
         onChange={(e) => onMove(e.target.value)}
         style={{ marginTop: 6, fontSize: 11, padding: '2px 4px', width: '100%' }}
       >
-        {COLUMN_KEYS.map((k) => (
-          <option key={k} value={k}>{k.replace(/_/g, ' ')}</option>
+        {columns.map((col) => (
+          <option key={col.key} value={col.key}>{col.title}</option>
         ))}
       </select>
     </div>
   )
 }
 
-function TaskForm({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
+export function TaskForm({ columns, onClose, onCreated }: { columns: Column[]; onClose: () => void; onCreated: () => void }) {
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [priority, setPriority] = useState('medium')
@@ -393,7 +396,7 @@ function TaskForm({ onClose, onCreated }: { onClose: () => void; onCreated: () =
           </Field>
           <Field label="Колонка">
             <select value={columnKey} onChange={(e) => setColumnKey(e.target.value)}>
-              {COLUMN_KEYS.map((k) => <option key={k} value={k}>{k.replace(/_/g, ' ')}</option>)}
+              {columns.map((col) => <option key={col.key} value={col.key}>{col.title}</option>)}
             </select>
           </Field>
           <Field label="Модуль">

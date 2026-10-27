@@ -453,14 +453,15 @@ class AiSettingsOut(BaseModel):
 
 class AiSettingsPatch(BaseModel):
     enabled: bool | None = None
-    priority_provider: str | None = None
+    priority_provider: Literal['gemini', 'deepseek'] | None = None
     prompt: str | None = None
     interval_minutes: int | None = Field(default=None, ge=5, le=1440)
-    triggers: dict | None = None
+    triggers: dict[str, bool] | None = None
 
 
 class AiRunRequest(BaseModel):
-    trigger: str = "manual"
+    trigger: Literal['manual', 'red_confirmed', 'blocker_created', 'blocker_closed', 'overdue', 'deadline_6h'] = "manual"
+    question: str = Field(default='', max_length=5000)
 
 
 class AiRecommendationOut(BaseModel):
@@ -471,5 +472,6 @@ class AiRecommendationOut(BaseModel):
     trigger: str
     summary: str
     content: str
+    request_context: dict | None = None
     excluded: bool
     created_at: datetime

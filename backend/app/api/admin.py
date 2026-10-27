@@ -154,19 +154,29 @@ def assign_role(body: RoleAssign, db: Session = Depends(get_db), admin: User = D
     if user is None:
         raise api_error(404, "NOT_FOUND", "Пользователь не найден")
     project_id = None if body.role == Role.admin else body.project_id
+    if body.role != Role.admin:
+        if project_id is None:
+            raise api_error(422, "VALIDATION_ERROR", "Для роли нужен проект")
+        from app.db.models import Project
+        if db.get(Project, project_id) is None:
+            raise api_error(404, "NOT_FOUND", "Проект не найден")
+    if not user.active:
+        raise api_error(422, "VALIDATION_ERROR", "Нельзя назначить роль отключённому пользователю")
     existing = (
         db.query(RoleAssignment)
         .filter(
             RoleAssignment.user_id == user.id,
             RoleAssignment.role == body.role,
             RoleAssignment.project_id == project_id,
-            RoleAssignment.revoked_at.is_(None),
         )
         .first()
     )
-    if existing:
+    if existing and existing.revoked_at is None:
         raise api_error(409, "ROLE_EXISTS", "Роль уже назначена")
-    assignment = RoleAssignment(user_id=user.id, role=body.role, project_id=project_id, granted_by=admin.id)
+    assignment = existing or RoleAssignment(user_id=user.id, role=body.role, project_id=project_id, granted_by=admin.id)
+    assignment.revoked_at = None
+    assignment.granted_by = admin.id
+    assignment.granted_at = _now()
     db.add(assignment)
     db.flush()
     write_audit(db, action="role.granted", actor_id=admin.id, entity_type="role", entity_id=assignment.id,

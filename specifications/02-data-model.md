@@ -29,9 +29,9 @@
 | `96cd78ac8062` | `435366661053` | `completion_votes`, `backup_records` |
 | `70df8d8dfcdd` | `96cd78ac8062` | `sandbox_runs` |
 | `bed2ce42ab1b` | `70df8d8dfcdd` | `task_dependencies.link_type` (NOT NULL без server_default) |
-| `38bb310f4d87` (head) | `bed2ce42ab1b` | `board_columns.auto_start_timer`, `board_columns.auto_stop_timer` (NOT NULL без server_default) |
+| `38bb310f4d87` (head) | `bed2ce42ab1b` | `board_columns.auto_start_timer`, `board_columns.auto_stop_timer` (NOT NULL, server_default=false) |
 
-Фактическое состояние файла `data/hackathon.db` на 2026-10-27 — `alembic_version = bed2ce42ab1b`, то есть на одну ревизию ниже head. Проверка на копии этой БД показала, что `alembic upgrade head` падает: `Cannot add a NOT NULL column with default value NULL` на `board_columns` (в таблице 27 строк). Подробнее — раздел 9.3.
+При стабилизации 2026-10-27 миграция `38bb310f4d87` исправлена: существующие колонки получают `false` для обоих правил таймера. Рабочая база обновлена до head без пересоздания; обновление заполненной таблицы проверяет `tests/test_migrations.py`. Описанные ниже ограничения этой ревизии относятся к состоянию до исправления; более ранняя `bed2ce42ab1b` в этом проходе не менялась.
 
 ### 1.3. Как проверить схему
 
@@ -671,7 +671,7 @@ for (name,) in c.execute("select name from sqlite_master where type='table' orde
 | «Порог критического дедлайна настраивается» | Поля нет |
 | «Предустановленные промпты, настройка капитаном/админом» | Один `DEFAULT_PROMPT` в коде; шаблонов и отдельной таблицы нет. `GET` настроек доступен любому аутентифицированному и создаёт строку при чтении |
 | «Рекомендация общая для команды, сохраняется в истории» | Сохраняется в `ai_recommendations`; общего канала/уведомления нет |
-| «Документы: браузерный редактор, автосохранение, аватары авторов и редакторов» | Только API; UI нет. `editors` — текущий держатель блокировки, авторы не отдаются; автосохранения нет |
+| UI документов | Экран, редактор и предпросмотр исключены из продукта; файлы и существующий API сохраняются |
 | «Вложения, диаграммы, UML» | Только Markdown и изображения; изображения вне БД, без метаданных |
 | «История версий не обязательна» | Отсутствует полностью |
 | «Журнал доступен всем; исходная запись неизменяемо доступна» | Чтение — любому аутентифицированному; админ перезаписывает 3 поля, исходное значение только в `audit_revisions`; причины правки нет |
@@ -687,8 +687,8 @@ for (name,) in c.execute("select name from sqlite_master where type='table' orde
 
 | Проблема | Детали |
 | --- | --- |
-| Head-миграция не применяется к текущей БД | `data/hackathon.db`: `alembic_version = bed2ce42ab1b`; `38bb310f4d87` падает на `ALTER TABLE board_columns ADD COLUMN auto_start_timer BOOLEAN NOT NULL` (`Cannot add a NOT NULL column with default value NULL`, 27 строк в таблице). Поскольку `app.main.lifespan` вызывает `run_migrations()`, старт с этой БД не проходит этап миграций; `/columns` с текущими моделями также не смог бы прочитать отсутствующие колонки |
-| NOT NULL без default в миграциях | `bed2ce42ab1b` (`task_dependencies.link_type`) и `38bb310f4d87` (2 колонки). На пустой таблице SQLite может пропустить операцию, на непустой — нет; поведение зависит от данных |
+| Head-миграция | Исправлено 2026-10-27: `38bb310f4d87` задаёт `server_default=false`; заполненная рабочая БД успешно обновлена до head, backend запускается |
+| NOT NULL без default в старой миграции | `bed2ce42ab1b` (`task_dependencies.link_type`) требует отдельной проверки на более старой заполненной базе; текущая база уже содержала эту ревизию |
 | Нет batch-режима | `alembic/env.py` не задаёт `render_as_batch=True`; будущие ALTER/DROP/constraint на SQLite потребуют ручного `batch_alter_table` |
 | Проверка FK в миграциях | Отдельный engine в `env.py` не включает `PRAGMA foreign_keys`; DDL и downgrade идут без FK-проверок |
 | `stamp_head()` после restore | Восстановленная БД помечается head без сверки схемы; старый бэкап может не соответствовать моделям |
@@ -706,7 +706,7 @@ for (name,) in c.execute("select name from sqlite_master where type='table' orde
 
 ### 9.4. Не реализовано (не описывать как готовое)
 
-UI документов и журнала аудита, WebSocket/real-time, реальная отправка в Telegram (только лог), реальные Gemini/DeepSeek (mock), Google Drive, fxTunnel, Autoheal/Uptime Kuma, ИИ по расписанию и событийные триггеры, повторные попытки и второй провайдер, экспорт/клон проекта, CSRF-токены, размерные лимиты загрузок, версионирование документов, очистка сессий/аудита/старых записей бэкапов, сверка таймеров после простоя, предупреждения о зависимостях, привязка прав к проекту.
+UI журнала аудита, WebSocket/real-time, реальная отправка в Telegram (только лог), реальные Gemini/DeepSeek (mock), Google Drive, fxTunnel, Autoheal/Uptime Kuma, ИИ по расписанию и событийные триггеры, повторные попытки и второй провайдер, экспорт/клон проекта, CSRF-токены, размерные лимиты загрузок, версионирование документов, очистка сессий/аудита/старых записей бэкапов, сверка таймеров после простоя, предупреждения о зависимостях, привязка прав к проекту.
 
 ## 10. Сущность → API/сервис → тесты
 

@@ -384,7 +384,21 @@ class AiRecommendation(Base):
     trigger: Mapped[str] = mapped_column(String(32), default="manual", nullable=False)
     summary: Mapped[str] = mapped_column(String(500), nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
+    request_context: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     excluded: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class TelegramDelivery(Base):
+    """Persistent preview of messages; never sends to an external service."""
+    __tablename__ = "telegram_deliveries"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int | None] = mapped_column(ForeignKey('projects.id'), nullable=True, index=True)
+    event_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    mentions: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
+    mode: Mapped[str] = mapped_column(String(16), default='mock', nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
@@ -417,5 +431,7 @@ class SandboxRun(Base):
     scenario: Mapped[str] = mapped_column(String(64), nullable=False)
     status: Mapped[str] = mapped_column(String(16), default="ok", nullable=False)
     logs: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
+    checks: Mapped[list[dict]] = mapped_column(JSON, default=list, nullable=False)
+    duration_ms: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     run_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

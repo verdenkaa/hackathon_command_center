@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.api.errors import api_error
 from app.db.models import Notification, User
-from app.deps import get_current_user, get_db
+from app.deps import get_current_user, get_db, visible_project_ids
 from app.schemas import NotificationOut
 from app.timeutil import utcnow
 
@@ -21,6 +21,7 @@ def list_notifications(
     limit: int = Query(100, ge=1, le=500),
 ) -> list[NotificationOut]:
     q = db.query(Notification).filter(Notification.user_id == user.id)
+    q = q.filter(Notification.project_id.is_(None) | Notification.project_id.in_(visible_project_ids(db, user.id)))
     if unread_only:
         q = q.filter(Notification.read_at.is_(None))
     rows = q.order_by(Notification.created_at.desc()).limit(limit).all()

@@ -6,10 +6,11 @@ from sqlalchemy.orm import Session
 
 from app.api.errors import api_error
 from app.db.models import Incident, Role, User
-from app.deps import active_roles, ensure_project_active, get_current_user, get_db
+from app.deps import project_roles, project_member_ids, ensure_project_active, get_current_user, get_db
 from app.schemas import CommentIncident, ConfirmRed, IncidentCreate, IncidentOut, ResolveIncident
 from app.services import incidents as incidents_svc
 from app.services import notifications as notify_svc
+from app.services.ai import maybe_recommend
 
 router = APIRouter(tags=["incidents"])
 
@@ -21,12 +22,12 @@ def _get_incident(db: Session, incident_id: int) -> Incident:
     return incident
 
 
-def _roles(db: Session, user: User) -> set[Role]:
-    return {a.role for a in active_roles(db, user.id)}
+def _roles(db: Session, user: User, project_id: int) -> set[Role]:
+    return project_roles(db, user.id, project_id)
 
 
-def _is_captain(db: Session, user: User) -> bool:
-    return bool(_roles(db, user) & {Role.captain, Role.admin})
+def _is_captain(db: Session, user: User, project_id: int) -> bool:
+    return bool(_roles(db, user, project_id) & {Role.captain, Role.admin})
 
 
 @router.get("/projects/{project_id}/incidents", response_model=list[IncidentOut])
@@ -54,6 +55,19 @@ def create_incident(
     user: User = Depends(get_current_user),
 ) -> IncidentOut:
     ensure_project_active(db, project_id)
+    members = project_member_ids(db, project_id)
+    if body.owner_id is not None and body.owner_id not in members:
+        raise api_error(422, "VALIDATION_ERROR", "Ответственный не участник проекта")
+    from app.db.models import Task, Module
+    for target in body.targets:
+        if target.target_type == 'user':
+            valid = target.target_id in members
+        else:
+            model = {'task': Task, 'module': Module}.get(target.target_type)
+            entity = db.get(model, target.target_id) if model else None
+            valid = entity is not None and entity.project_id == project_id
+        if not valid:
+            raise api_error(422, "VALIDATION_ERROR", "Цель не принадлежит проекту")
     if body.level not in ("yellow", "red"):
         raise api_error(422, "VALIDATION_ERROR", "Уровень должен быть yellow или red")
     for t in body.targets:
@@ -76,15 +90,17 @@ def create_incident(
     payload = {"incident_id": incident.id, "title": incident.title, "level": incident.level}
     if body.level == "red":
         notify_svc.notify_users(
-            db, project_id=project_id, user_ids=notify_svc.captains(db), ntype="incident_red_created",
+            db, project_id=project_id, user_ids=notify_svc.captains(db, project_id), ntype="incident_red_created",
             payload=payload, telegram_text=f"🔴 Запрос на эскалацию: {incident.title}",
         )
     else:
-        recipients = {body.owner_id, *notify_svc.captains(db)} - {None}
+        recipients = {body.owner_id, *notify_svc.captains(db, project_id)} - {None}
         notify_svc.notify_users(
             db, project_id=project_id, user_ids=list(recipients), ntype="incident_yellow_created",
             payload=payload, telegram_text=f"🟡 Блокер: {incident.title}",
         )
+    if body.level == 'yellow':
+        maybe_recommend(db, project_id, 'blocker_created')
     db.commit()
     db.refresh(incident)
     return incidents_svc.serialize_incident(db, incident)
@@ -102,17 +118,18 @@ def confirm_red(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> IncidentOut:
-    if not _is_captain(db, user):
-        raise api_error(403, "FORBIDDEN", "Подтверждать может только капитан")
     incident = _get_incident(db, incident_id)
+    if not _is_captain(db, user, incident.project_id):
+        raise api_error(403, "FORBIDDEN", "Подтверждать может только капитан")
     ensure_project_active(db, incident.project_id)
     incidents_svc.confirm_red(db, incident, user.id, body.confirm, body.comment)
     if body.confirm:
         notify_svc.notify_users(
-            db, project_id=incident.project_id, user_ids=notify_svc.team(db), ntype="incident_red_confirmed",
+            db, project_id=incident.project_id, user_ids=notify_svc.team(db, incident.project_id), ntype="incident_red_confirmed",
             payload={"incident_id": incident.id, "title": incident.title},
             telegram_text=f"🔴 Глобальная проблема: {incident.title}",
         )
+        maybe_recommend(db, incident.project_id, 'red_confirmed')
     db.commit()
     db.refresh(incident)
     return incidents_svc.serialize_incident(db, incident)
@@ -128,10 +145,10 @@ def resolve_incident(
     incident = _get_incident(db, incident_id)
     ensure_project_active(db, incident.project_id)
     if incident.level == "red":
-        if not _is_captain(db, user):
+        if not _is_captain(db, user, incident.project_id):
             raise api_error(403, "FORBIDDEN", "Красный инцидент закрывает капитан")
     else:
-        if incident.owner_id != user.id and not _is_captain(db, user):
+        if incident.owner_id != user.id and not _is_captain(db, user, incident.project_id):
             raise api_error(403, "FORBIDDEN", "Жёлтый инцидент закрывает ответственный или капитан")
 
     incidents_svc.resolve_incident(db, incident, user.id, body.resolution)
@@ -141,6 +158,7 @@ def resolve_incident(
         payload={"incident_id": incident.id, "title": incident.title, "resolution": body.resolution},
         telegram_text=f"✅ Инцидент закрыт: {incident.title}",
     )
+    maybe_recommend(db, incident.project_id, 'blocker_closed')
     db.commit()
     db.refresh(incident)
     return incidents_svc.serialize_incident(db, incident)

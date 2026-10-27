@@ -1,14 +1,19 @@
 import { useEffect, useState } from 'react'
-import { api, AiSettings, Me } from './api'
+import { api, AiSettings, Me, currentProject } from './api'
 import { Badge, Field, fmtDate, useLoad } from './ui'
+import { AI_TRIGGERS } from './MockAi'
+import { Sandbox } from './Sandbox'
 
-export function Settings({ me, onProjectsChanged }: { me: Me; onProjectsChanged: () => void }) {
+export function Settings({ me, onProjectsChanged, onOpenProject }: {
+  me: Me; onProjectsChanged: () => void
+  onOpenProject: (id:number,view:'board'|'incidents'|'analytics')=>void
+}) {
   const isAdmin = me.roles.some((r) => r.role === 'admin')
-  const isCaptain = me.roles.some((r) => r.role === 'captain' || r.role === 'admin')
+  const isCaptain = me.roles.some((r) => r.role === 'admin' || (r.role === 'captain' && r.project_id === currentProject()))
   const [msg, setMsg] = useState('')
 
   return (
-    <div style={{ maxWidth: 720 }}>
+    <><div style={{ maxWidth: 720 }}>
       <h3 style={{ margin: '4px 0 12px' }}>Настройки</h3>
       {msg && <div className="card" style={{ marginBottom: 12, borderColor: 'var(--ok)' }}>{msg}</div>}
 
@@ -18,6 +23,10 @@ export function Settings({ me, onProjectsChanged }: { me: Me; onProjectsChanged:
       <CompletionSection isCaptain={isCaptain} setMsg={setMsg} />
       <AiSection isCaptain={isCaptain} setMsg={setMsg} />
     </div>
+    {isAdmin && <details className="card" style={{maxWidth:1100,marginTop:24}}>
+      <summary style={{cursor:'pointer',fontWeight:600}}>Песочница · тестирование и очистка</summary>
+      <Sandbox onProjectsChanged={onProjectsChanged} onOpenProject={onOpenProject}/>
+    </details>}</>
   )
 }
 
@@ -326,6 +335,8 @@ function AiSection({ isCaptain, setMsg }: { isCaptain: boolean; setMsg: (s: stri
   const [enabled, setEnabled] = useState<boolean | null>(null)
   const [provider, setProvider] = useState('')
   const [interval, setIntervalMin] = useState('')
+  const [prompt, setPrompt] = useState<string | null>(null)
+  const [triggers, setTriggers] = useState<Record<string, boolean> | null>(null)
 
   if (!settings) return null
   const effEnabled = enabled ?? settings.enabled
@@ -335,6 +346,7 @@ function AiSection({ isCaptain, setMsg }: { isCaptain: boolean; setMsg: (s: stri
   return (
     <div className="card section">
       <div className="section-title">ИИ-советник</div>
+      <p className="muted">Режим моков: Gemini и DeepSeek не вызываются. Контекст запроса доступен в аналитике.</p>
       <div className="row" style={{ marginBottom: 8 }}>
         <label className="row" style={{ cursor: 'pointer' }}>
           <input
@@ -350,15 +362,25 @@ function AiSection({ isCaptain, setMsg }: { isCaptain: boolean; setMsg: (s: stri
       <div className="row">
         <Field label="Приоритетный провайдер">
           <select value={effProvider} disabled={!isCaptain} onChange={(e) => setProvider(e.target.value)}>
-            <option value="gemini">Gemini (бесплатный)</option>
-            <option value="deepseek">DeepSeek (платный)</option>
+            <option value="gemini">Gemini (мок)</option>
+            <option value="deepseek">DeepSeek (мок)</option>
           </select>
         </Field>
         <Field label="Интервал (минут)">
           <input type="number" min="5" value={effInterval} disabled={!isCaptain} onChange={(e) => setIntervalMin(e.target.value)} />
         </Field>
       </div>
-      {isCaptain && (enabled !== null || provider !== '' || interval !== '') && (
+      <Field label="Промпт советника">
+        <textarea rows={5} value={prompt ?? settings.prompt} disabled={!isCaptain} onChange={(e) => setPrompt(e.target.value)} />
+      </Field>
+      <div className="section-title">События для ИИ</div>
+      {Object.entries(AI_TRIGGERS).map(([key, label]) => <label className="row" key={key} style={{marginBottom:6}}>
+        <input type="checkbox" style={{width:'auto'}} disabled={!isCaptain}
+          checked={(triggers ?? settings.triggers)[key] ?? false}
+          onChange={(e) => setTriggers({...settings.triggers, ...triggers, [key]:e.target.checked})} />
+        {label}
+      </label>)}
+      {isCaptain && (enabled !== null || provider !== '' || interval !== '' || prompt !== null || triggers !== null) && (
         <button
           className="primary small"
           onClick={async () => {
@@ -366,10 +388,14 @@ function AiSection({ isCaptain, setMsg }: { isCaptain: boolean; setMsg: (s: stri
               enabled: effEnabled,
               priority_provider: effProvider,
               interval_minutes: Number(effInterval),
+              prompt: prompt ?? settings.prompt,
+              triggers: triggers ?? settings.triggers,
             })
             setEnabled(null)
             setProvider('')
             setIntervalMin('')
+            setPrompt(null)
+            setTriggers(null)
             reload()
             setMsg('Настройки ИИ сохранены')
           }}

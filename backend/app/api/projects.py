@@ -17,7 +17,7 @@ from app.db.models import (
     TaskTimer,
     User,
 )
-from app.deps import active_roles, get_current_user, get_db, require_admin, require_member
+from app.deps import active_roles, get_current_user, get_db, require_admin, require_member, project_roles, visible_project_ids
 from app.schemas import (
     ColumnCreate,
     ColumnOut,
@@ -48,7 +48,7 @@ def _get_project(db: Session, project_id: int) -> Project:
 
 @router.get("/projects", response_model=list[ProjectOut])
 def list_projects(db: Session = Depends(get_db), _u=Depends(get_current_user)) -> list[ProjectOut]:
-    rows = db.query(Project).order_by(Project.id).all()
+    rows = db.query(Project).filter(Project.id.in_(visible_project_ids(db, _u.id))).order_by(Project.id).all()
     return [ProjectOut.model_validate(p) for p in rows]
 
 
@@ -86,7 +86,7 @@ def patch_project(
 ) -> ProjectOut:
     project = _get_project(db, project_id)
     updates = body.model_dump(exclude_unset=True)
-    roles = {a.role for a in active_roles(db, user.id)}
+    roles = project_roles(db, user.id, project_id)
 
     if "deadline_msk" in updates:
         if Role.admin not in roles:
@@ -262,50 +262,5 @@ def delete_module(module_id: int, db: Session = Depends(get_db), user: User = De
 @router.get("/projects/{project_id}/participants", response_model=list[ParticipantOut])
 def list_participants(project_id: int, db: Session = Depends(get_db), _u=Depends(require_member)) -> list[ParticipantOut]:
     _get_project(db, project_id)
-    member_ids = {
-        r[0]
-        for r in db.query(RoleAssignment.user_id)
-        .join(User, User.id == RoleAssignment.user_id)
-        .filter(RoleAssignment.revoked_at.is_(None), User.active.is_(True))
-        .all()
-    }
-    done_cols = [
-        c.id
-        for c in db.query(BoardColumn)
-        .filter(BoardColumn.project_id == project_id, BoardColumn.key.in_(["done", "realised", "trashed"]))
-        .all()
-    ]
-
-    result: list[ParticipantOut] = []
-    for uid in member_ids:
-        user = db.get(User, uid)
-        assignee_task_ids = [a.task_id for a in db.query(TaskAssignee).filter(TaskAssignee.user_id == uid).all()]
-        running = (
-            db.query(TaskTimer)
-            .filter(TaskTimer.task_id.in_(assignee_task_ids), TaskTimer.state == "running")
-            .all()
-            if assignee_task_ids
-            else []
-        )
-        running_seconds = sum(
-            current_elapsed(t) for t in running
-        )
-        active_tasks = (
-            db.query(Task)
-            .filter(Task.id.in_(assignee_task_ids), Task.column_id.notin_(done_cols))
-            .count()
-            if assignee_task_ids
-            else 0
-        )
-        result.append(
-            ParticipantOut(
-                id=user.id,
-                login=user.login,
-                display_name=user.display_name,
-                telegram_username=user.telegram_username,
-                traffic_status=traffic_status(db, "user", user.id),
-                active_tasks=active_tasks,
-                active_timer_seconds=running_seconds,
-            )
-        )
-    return result
+    from app.services.analytics import participants
+    return participants(db, project_id)

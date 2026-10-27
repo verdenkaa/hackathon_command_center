@@ -43,7 +43,7 @@ def test_modules_crud(client):
 def test_participant_can_create_module(client):
     login(client)
     client.post("/api/v1/admin/users", json={"login": "p", "password": "p-pass", "display_name": "P"})
-    client.post("/api/v1/admin/roles", json={"user_id": 2, "role": "participant"})
+    client.post("/api/v1/admin/roles", json={"user_id": 2, "role": "participant", "project_id": 1})
     login(client, login="p", password="p-pass")
     r = client.post("/api/v1/projects/1/modules", json={"name": "Front"})
     assert r.status_code == 200

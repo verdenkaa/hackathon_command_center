@@ -63,7 +63,7 @@ def test_time_adjustment_requires_captain(client):
 def test_time_adjustment_denied_for_participant(client):
     login(client)
     client.post("/api/v1/admin/users", json={"login": "p", "password": "p", "display_name": "P"})
-    client.post("/api/v1/admin/roles", json={"user_id": 2, "role": "participant"})
+    client.post("/api/v1/admin/roles", json={"user_id": 2, "role": "participant", "project_id": 1})
     task_id = _create_task(client)
     login(client, login="p", password="p")
     r = client.post(f"/api/v1/tasks/{task_id}/time-adjustment", json={"accumulated_seconds": 60})

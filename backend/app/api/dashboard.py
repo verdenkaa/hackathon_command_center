@@ -46,7 +46,8 @@ def dashboard(project_id: int, db: Session = Depends(get_db), _u=Depends(require
     ]
 
     running_timers = (
-        db.query(TaskTimer).filter(TaskTimer.state == "running").all()
+        db.query(TaskTimer).join(Task, Task.id == TaskTimer.task_id)
+        .filter(Task.project_id == project_id, TaskTimer.state == "running").all()
     )
     running_task_ids = {t.task_id for t in running_timers}
     active_participants = len(

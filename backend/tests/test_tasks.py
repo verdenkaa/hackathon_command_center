@@ -44,6 +44,7 @@ def test_version_conflict(client):
 def test_set_assignees(client):
     login(client)
     client.post("/api/v1/admin/users", json={"login": "alice", "password": "a", "display_name": "Alice"})
+    client.post('/api/v1/admin/roles', json={'user_id': 2, 'role': 'participant', 'project_id': 1})
     task_id = _create_task(client).json()["id"]
     r = client.put(
         f"/api/v1/tasks/{task_id}/assignees",
@@ -114,7 +115,7 @@ def test_task_filters(client):
 def test_participant_can_create_task(client):
     login(client)
     client.post("/api/v1/admin/users", json={"login": "carol", "password": "c", "display_name": "Carol"})
-    client.post("/api/v1/admin/roles", json={"user_id": 2, "role": "participant"})
+    client.post("/api/v1/admin/roles", json={"user_id": 2, "role": "participant", "project_id": 1})
     login(client, login="carol", password="c")
     r = _create_task(client, title="От участника")
     assert r.status_code == 200

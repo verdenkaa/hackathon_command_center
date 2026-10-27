@@ -31,6 +31,10 @@
 
 ## Как читать
 
+- Для быстрого тестирования: [12-sandbox.md](12-sandbox.md) — демо-набор, автопроверки и очистка тестового проекта.
+
+- Актуальный объём после стабилизации: [11-stabilization.md](11-stabilization.md). Этот раздел уточняет устаревшие таблицы реализации в документах `07`–`10` и спецификациях. Экран документов и редактор исключены; ИИ и Telegram остаются проверяемыми моками.
+
 - Новому разработчику: [08-development-guide.md](08-development-guide.md) → [../specifications/01-stack-and-layout.md](../specifications/01-stack-and-layout.md) → [../specifications/07-flows.md](../specifications/07-flows.md).
 - Перед изменением API или схемы БД: [../specifications/03-api.md](../specifications/03-api.md) и [../specifications/02-data-model.md](../specifications/02-data-model.md).
 - Перед демонстрацией или деплоем: [07-implementation-status.md](07-implementation-status.md) и [09-operations-runbook.md](09-operations-runbook.md).

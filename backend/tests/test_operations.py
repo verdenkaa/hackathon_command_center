@@ -11,7 +11,7 @@ def _make_user(client, username: str, password: str, role: str | None = None) ->
     r = client.post("/api/v1/admin/users", json={"login": username, "password": password, "display_name": username})
     uid = r.json()["id"]
     if role:
-        client.post("/api/v1/admin/roles", json={"user_id": uid, "role": role})
+        client.post("/api/v1/admin/roles", json={"user_id": uid, "role": role, "project_id": 1})
     return uid
 
 

@@ -216,7 +216,7 @@
 | documents | 13 |
 | AI | 5 |
 | operations (backups, votes, jobs) | 5 |
-| sandbox | 3 |
+| sandbox | 7 |
 | **Итого `/api/v1`** | **86** |
 
 ### 3.1 Общие схемы ответов
@@ -341,7 +341,7 @@
 
 | Метод и путь | Кто | Вход | Выход | Особенности и ошибки |
 | --- | --- | --- | --- | --- |
-| `GET /projects/{project_id}/dashboard` | member | — | `DashboardOut` | 404 `NOT_FOUND`; `total_tasks` — все задачи, кроме `trashed`; `completed` — `done`+`realised`; `in_progress` — `in_progress`+`testing`+`review`; `overdue` — не завершённые задачи с дедлайном в прошлом; `progress_percent` — доля завершённых, 1 знак; `estimate_seconds`/`actual_seconds` считаются по **всем** задачам, включая `trashed`; `calendar_seconds` — объединение интервалов сегментов проекта; `active_timers`/`active_participants` считаются по идущим таймерам **всех** проектов; `risks` содержит только просрочки |
+| `GET /projects/{project_id}/dashboard` | member | — | `DashboardOut` | 404 `NOT_FOUND`; `total_tasks` — все задачи, кроме `trashed`; `completed` — `done`+`realised`; `in_progress` — `in_progress`+`testing`+`review`; `overdue` — не завершённые задачи с дедлайном в прошлом; `progress_percent` — доля завершённых, 1 знак; `estimate_seconds`/`actual_seconds` считаются по **всем** задачам, включая `trashed`; `calendar_seconds` — объединение интервалов сегментов проекта; `active_timers`/`active_participants` считаются по идущим таймерам **выбранного** проекта; `risks` содержит только просрочки |
 
 ### 3.10 Аналитика
 
@@ -412,13 +412,19 @@
 
 ### 3.16 Песочница
 
+Актуальное расширение: [стенд и API песочницы](../docs/12-sandbox.md#api). Дополнительно доступны `/workspace`, `/checks`, `/reset`, `/telegram`; `/run` принимает `full_check` и `check:<group>`. Старые таблицы ниже описывают исходный прототип; неизвестный сценарий теперь возвращает 422, а отчёт содержит `checks[]` и `duration_ms`.
+
 Все маршруты защищены `admin` на уровне роутера и внутри обработчика; префикс `/admin/sandbox`.
 
 | Метод и путь | Кто | Вход | Выход | Особенности и ошибки |
 | --- | --- | --- | --- | --- |
-| `GET /admin/sandbox/scenarios` | admin | — | `{scenario: description}` | Шесть сценариев: `create_team`, `simulate_sprint`, `overdue_as_dev`, `incident_as_dev`, `timer_cycle`, `integration_failure` |
-| `POST /admin/sandbox/run` | admin | `{"scenario": str}` (непустая) | `SandboxRunOut` | Неизвестный сценарий → `status="error"` и лог, HTTP 200; исключение внутри сценария перехватывается, делается rollback, запуск записывается как `error`; часть операций коммитит внутри, поэтому эффекты могут остаться частично; создаёт реальные данные в БД |
+| `GET /admin/sandbox/scenarios` | admin | — | `{scenario: description}` | Подготовка демо, команда, спринт, просрочка, блокер, таймер, мок-уведомления и проверка ошибок ИИ |
+| `POST /admin/sandbox/run` | admin | `{"scenario": str}` | `SandboxRunOut` | Принимает сценарий, `full_check` или `check:<group>`; неизвестный ключ → 422; занятый стенд → 409; отчёт содержит `checks[]`, `duration_ms` и корректный статус ошибки. Подготовка данных меняет только тестовый проект, диагностика использует временные БД |
 | `GET /admin/sandbox/runs` | admin | — | `SandboxRunOut[]` | Последние 100 запусков по `created_at` desc |
+| `GET /admin/sandbox/workspace` | admin | — | `WorkspaceOut` | Сводка выделенного проекта и тестовые аккаунты; чтение не создаёт новый проект |
+| `GET /admin/sandbox/checks` | admin | — | `{key: title}` | Семь групп диагностических проверок |
+| `POST /admin/sandbox/reset` | admin | `{"project_id": int, "confirm": bool}` | `ResetOut` | 422 без подтверждения; 409 для чужого проекта или занятости; перед очисткой — копия SQLite и архив файлов; общие аккаунты сохраняются |
+| `GET /admin/sandbox/telegram` | admin | `project_id`, `limit` (1–500) | `TelegramDeliveryOut[]` | Журнал предполагаемых отправок; внешних вызовов нет |
 
 ## 4. Сквозные правила
 
@@ -639,7 +645,8 @@ curl -s -b cookies.txt -H 'Content-Type: application/json' \
 | Google Drive для внешней копии | Нет; `GOOGLE_DRIVE_FOLDER_ID` не используется |
 | Реальная отправка в Telegram | Нет; только запись в лог, без ретраев и статуса доставки |
 | CSRF-токены, `Secure`-cookie | Нет |
-| UI документов и аудита | API есть (13 + 2 эндпоинта), в `frontend/src/api.ts` методов нет |
+| UI документов | Исключён из продукта; API сохраняется |
+| UI аудита | API есть; экран отсутствует |
 | Удаление задачи, постоянное удаление документа, версии и папки документов | Нет; задача уходит в колонку `trashed`, документ — в мягкую корзину |
 | Реактивация пользователя, самостоятельная смена пароля, удаление пользователя | Нет |
 | Список IP-правил, счётчик непрочитанных уведомлений, отчёт/CSV, метрики | Нет |
@@ -706,7 +713,7 @@ curl -s -b cookies.txt -H 'Content-Type: application/json' \
 | 503 при недоступности внешней интеграции | Не используется; внешних вызовов нет |
 | «Для параллельных изменений использовать `version` или `updated_at`» | `version` — только задачи; `updated_at` не проверяется; документы — `base_checksum` |
 | «Голос капитана» за завершение | Требуется единогласие всех активных `captain` **и** `admin`; голоса глобальные |
-| `GET/POST /admin/sandbox/*` | Три фиксированных пути: `/scenarios`, `/run`, `/runs` |
+| `GET/POST /admin/sandbox/*` | `/scenarios`, `/checks`, `/workspace`, `/run`, `/runs`, `/telegram`, `/reset` |
 | «Таймеры и резервное копирование останавливаются» при завершении (docs/01) | Бэкапы продолжаются по расписанию; таймеры нельзя запускать, но уже идущий нельзя даже приостановить или остановить |
 | «Из архива можно создать копию проекта» (docs/01) | Клонирования нет |
 | Роли привязаны к проекту | Проверки игнорируют `project_id`; любая роль открывает все проекты |
@@ -718,7 +725,7 @@ curl -s -b cookies.txt -H 'Content-Type: application/json' \
 3. **Единый формат ошибок не гарантирован.** 404/405 маршрута и 500 не имеют конверта; часть семантических ошибок отдаётся как 422 (`CONFIRM_REQUIRED`, расширение файла, уровень инцидента), часть — как 404 (`COLUMN_NOT_FOUND`).
 4. **Явный `null` и дубли не валидируются.** `PATCH /tasks/{id}` с `"title": null` или `"tags": null` приводит к `IntegrityError` и 500; дубли `user_id` в исполнителях и целей инцидента могут дать 500 на уникальном индексе.
 5. **Отсутствие проекта не всегда даёт 404.** `GET /projects/{id}/analytics` и `POST /projects/{id}/ai/run` падают с 500; `GET /projects/{id}/documents`, `/tasks`, `/incidents`, `/ai/recommendations` возвращают пустой список; `POST /projects/{id}/documents` при включённых FK даёт 500.
-6. **Дашборд и аналитика считают часть KPI по всем проектам.** `active_timers` и `active_participants` берут все идущие таймеры без фильтра проекта; `estimate_seconds`/`actual_seconds` включают задачи в `trashed`; `analytics.risks` тоже включает `trashed`, а `dashboard.risks` — нет.
+6. **Состав KPI.** С 2026-10-27 `active_timers` и `active_participants` в дашборде и аналитике ограничены выбранным проектом. `estimate_seconds`/`actual_seconds` включают задачи в `trashed`; `analytics.risks` тоже включает `trashed`, а `dashboard.risks` — нет.
 7. **`Module.traffic_status` — мёртвое поле.** В `GET /projects/{id}/modules` всегда `green`; реальный светофор считается только в `analytics.modules` и `participants`.
 8. **ИИ — mock с непостоянными настройками.** `GET /ai/settings` не сохраняет дефолтную строку; лимит частоты живёт в памяти процесса; `triggers` не используются; `excluded` ни на что не влияет; ключи Gemini/DeepSeek игнорируются; запуск доступен любому аутентифицированному.
 9. **Документы доступны без членства и без проверки завершённости.** Блокировка не защищает сохранение: `PUT content` не проверяет владельца lock. Мягкое удаление оставляет файл и занимает путь. Нет лимита размера и проверки содержимого (SVG принимается). Проверка пути `startswith` не защищает от перехода в соседний каталог с тем же префиксом (`documents/1` → `documents/10`). Аудит не пишется.

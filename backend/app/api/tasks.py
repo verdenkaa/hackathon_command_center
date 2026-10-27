@@ -219,8 +219,9 @@ def set_assignees(
     if body.assignees and len(primaries) != 1:
         raise api_error(422, "VALIDATION_ERROR", "Должен быть ровно один основной исполнитель")
     for a in body.assignees:
-        if db.get(User, a.user_id) is None:
-            raise api_error(422, "VALIDATION_ERROR", f"Пользователь {a.user_id} не найден")
+        from app.deps import project_member_ids
+        if a.user_id not in project_member_ids(db, task.project_id):
+            raise api_error(422, "VALIDATION_ERROR", f"Пользователь {a.user_id} не участник проекта")
 
     db.query(TaskAssignee).filter(TaskAssignee.task_id == task_id).delete()
     for a in body.assignees:

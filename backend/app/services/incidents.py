@@ -90,7 +90,7 @@ def add_comment(db: Session, incident: Incident, actor_id: int, text: str) -> No
     db.flush()
 
 
-def traffic_status(db: Session, target_type: str, target_id: int) -> str:
+def traffic_status(db: Session, target_type: str, target_id: int, project_id: int | None = None) -> str:
     active = (
         db.query(Incident)
         .join(IncidentTarget, IncidentTarget.incident_id == Incident.id)
@@ -98,6 +98,7 @@ def traffic_status(db: Session, target_type: str, target_id: int) -> str:
             IncidentTarget.target_type == target_type,
             IncidentTarget.target_id == target_id,
             Incident.status != "resolved",
+            *([Incident.project_id == project_id] if project_id is not None else []),
         )
         .all()
     )

@@ -1,7 +1,7 @@
 """ИИ-советник: снимок проекта, rate-limit, mock-провайдер (реальный — после ключей)."""
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 from sqlalchemy.orm import Session
 
@@ -13,6 +13,7 @@ from app.db.models import (
     Incident,
     Project,
     Task,
+    TaskAssignee,
 )
 from app.timeutil import utcnow
 
@@ -28,10 +29,6 @@ DEFAULT_TRIGGERS = {
     "overdue": True,
     "deadline_6h": True,
 }
-
-# Простейший ограничитель частоты (in-memory).
-_last_run: dict[int, datetime] = {}
-
 
 def get_settings(db: Session, project_id: int) -> AiSettings:
     settings = db.query(AiSettings).filter(AiSettings.project_id == project_id).first()
@@ -49,18 +46,13 @@ def get_settings(db: Session, project_id: int) -> AiSettings:
     return settings
 
 
-def rate_limited(project_id: int, interval_minutes: int) -> bool:
-    last = _last_run.get(project_id)
-    return last is not None and (utcnow() - last) < timedelta(minutes=interval_minutes)
-
-
-def mark_run(project_id: int) -> None:
-    _last_run[project_id] = utcnow()
-
-
 def build_snapshot(db: Session, project_id: int) -> dict:
     project = db.get(Project, project_id)
-    tasks = db.query(Task).filter(Task.project_id == project_id).all()
+    if project is None:
+        raise api_error(404, 'NOT_FOUND', 'Проект не найден')
+    columns = {c.id: c.key for c in db.query(BoardColumn).filter(BoardColumn.project_id == project_id).all()}
+    tasks = [t for t in db.query(Task).filter(Task.project_id == project_id).order_by(Task.id).all()
+             if columns.get(t.column_id) != 'trashed']
     done_ids = {
         c.id
         for c in db.query(BoardColumn)
@@ -85,7 +77,22 @@ def build_snapshot(db: Session, project_id: int) -> dict:
         "tasks_done": sum(1 for t in tasks if t.column_id in done_ids),
         "overdue": overdue,
         "active_incidents": [{"title": i.title, "level": i.level, "status": i.status} for i in active_incidents],
+        'tasks': [{'id': t.id, 'title': t.title, 'description': t.description,
+                   'column': columns.get(t.column_id), 'priority': t.priority, 'tags': t.tags,
+                   'estimate_seconds': t.estimate_seconds,
+                   'deadline': t.deadline.isoformat() if t.deadline else None,
+                   'assignee_ids': [a.user_id for a in db.query(TaskAssignee).filter(TaskAssignee.task_id == t.id).all()]}
+                  for t in tasks],
+        'previous_recommendations': [{'summary': r.summary, 'content': r.content}
+            for r in db.query(AiRecommendation).filter(AiRecommendation.project_id == project_id,
+                AiRecommendation.excluded.is_(False)).order_by(AiRecommendation.id.desc()).limit(5).all()],
     }
+
+
+def preview_request(db: Session, project_id: int, trigger: str = 'manual', question: str = '') -> dict:
+    settings = get_settings(db, project_id)
+    return {'mode': 'mock', 'provider': settings.priority_provider, 'prompt': settings.prompt,
+            'trigger': trigger, 'question': question, 'snapshot': build_snapshot(db, project_id)}
 
 
 def _mock_recommendation(snapshot: dict) -> tuple[str, str]:
@@ -108,15 +115,19 @@ def _mock_recommendation(snapshot: dict) -> tuple[str, str]:
     return summary, content
 
 
-def run_recommendation(db: Session, project_id: int, trigger: str) -> AiRecommendation:
+def run_recommendation(db: Session, project_id: int, trigger: str, question: str = '') -> AiRecommendation:
     settings = get_settings(db, project_id)
     if not settings.enabled:
         raise api_error(409, "AI_DISABLED", "ИИ-советник выключен")
-    if trigger != "manual" and rate_limited(project_id, settings.interval_minutes):
-        raise api_error(429, "RATE_LIMITED", "Частота запусков ИИ ограничена")
-    mark_run(project_id)
+    if trigger != 'manual':
+        if not settings.triggers.get(trigger, False):
+            raise api_error(409, 'TRIGGER_DISABLED', 'Триггер ИИ выключен')
+        last = db.query(AiRecommendation).filter(AiRecommendation.project_id == project_id).order_by(AiRecommendation.created_at.desc()).first()
+        if last is not None and utcnow() - last.created_at < timedelta(minutes=settings.interval_minutes):
+            raise api_error(429, "RATE_LIMITED", "Частота запусков ИИ ограничена")
 
-    snapshot = build_snapshot(db, project_id)
+    context = preview_request(db, project_id, trigger, question)
+    snapshot = context['snapshot']
     # Mock-провайдер (реальные Gemini/DeepSeek подключатся после передачи ключей).
     summary, content = _mock_recommendation(snapshot)
     rec = AiRecommendation(
@@ -125,7 +136,27 @@ def run_recommendation(db: Session, project_id: int, trigger: str) -> AiRecommen
         trigger=trigger,
         summary=summary,
         content=content,
+        request_context=context,
     )
     db.add(rec)
     db.flush()
+    from app.services.notifications import notify_users, team
+    notify_users(db, project_id=project_id, user_ids=team(db, project_id), ntype='ai_recommendation',
+                 payload={'recommendation_id': rec.id, 'title': summary},
+                 telegram_text=f'🤖 Мок-рекомендация ИИ: {summary}')
     return rec
+
+
+def maybe_recommend(db: Session, project_id: int, trigger: str) -> bool:
+    """Run enabled mock triggers within the same event transaction."""
+    from fastapi import HTTPException
+    settings = db.query(AiSettings).filter(AiSettings.project_id == project_id).first()
+    if settings is None or not settings.enabled or not settings.triggers.get(trigger, False):
+        return False
+    try:
+        run_recommendation(db, project_id, trigger)
+        return True
+    except HTTPException as exc:
+        if exc.status_code in (409, 429):
+            return False
+        raise

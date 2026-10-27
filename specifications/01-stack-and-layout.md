@@ -45,7 +45,7 @@
 | React Router | нет; вкладки в состоянии `App.tsx` |
 | Redux/Zustand и другой state manager | нет |
 | WebSocket | нет ни на backend, ни на frontend; опрос интервалами |
-| Markdown-редактор, Mermaid | нет; документы только API |
+| UI документов | Исключён из продукта; существующие файлы и API сохраняются |
 | Vitest, React Testing Library, Playwright | нет; frontend-тестов нет |
 | ESLint, Prettier | конфигов нет |
 | axios | нет; нативный `fetch` |
@@ -264,7 +264,7 @@ Set-Location backend
 | --- | --- |
 | React + TanStack Query + Tailwind CSS + shadcn/ui | только React, TypeScript, Vite и чистый CSS |
 | WebSocket для обновлений в реальном времени | нет; polling 1/5/10 с |
-| Markdown-редактор с Mermaid | нет; документы только через API |
+| UI документов | Исключён из продукта; существующие файлы и API сохраняются |
 | pytest + httpx, Vitest + RTL, Playwright | только pytest + httpx; frontend-тестов нет |
 | Пакеты `auth`, `domain`, `jobs`, `operations`, `sandbox` | `api` + `services` + `deps.py`; sandbox — два файла |
 | `data/` включает логи и очередь повторных внешних операций | логов и очереди нет; есть БД, документы, изображения, бэкапы |

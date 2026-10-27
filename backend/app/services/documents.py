@@ -22,7 +22,7 @@ def doc_root(project_id: int) -> Path:
 def resolve_path(project_id: int, rel_path: str) -> Path:
     root = doc_root(project_id).resolve()
     p = (root / rel_path).resolve()
-    if not str(p).startswith(str(root)):
+    if not p.is_relative_to(root):
         raise api_error(422, "VALIDATION_ERROR", "Некорректный путь документа")
     return p
 

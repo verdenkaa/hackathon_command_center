@@ -22,6 +22,7 @@ from app.schemas import ParticipantOut
 from app.services.incidents import traffic_status
 from app.services.timers import current_elapsed, get_timer, project_calendar_seconds, total_seconds
 from app.timeutil import utcnow
+from app.deps import project_member_ids
 
 
 def _column_ids(db: Session, project_id: int, *keys: str) -> set[int]:
@@ -48,7 +49,10 @@ def kpi(db: Session, project_id: int) -> dict:
         t for t in active_tasks
         if t.column_id not in done_ids and t.deadline is not None and t.deadline < now
     ]
-    running = db.query(TaskTimer).filter(TaskTimer.state == "running").all()
+    running = (
+        db.query(TaskTimer).join(Task, Task.id == TaskTimer.task_id)
+        .filter(Task.project_id == project_id, TaskTimer.state == "running").all()
+    )
     running_task_ids = {t.task_id for t in running}
     active_participants = len(
         {a.user_id for a in db.query(TaskAssignee).filter(TaskAssignee.task_id.in_(running_task_ids)).all()}
@@ -79,18 +83,13 @@ def kpi(db: Session, project_id: int) -> dict:
 
 
 def participants(db: Session, project_id: int) -> list[ParticipantOut]:
-    member_ids = {
-        r[0]
-        for r in db.query(RoleAssignment.user_id)
-        .join(User, User.id == RoleAssignment.user_id)
-        .filter(RoleAssignment.revoked_at.is_(None), User.active.is_(True))
-        .all()
-    }
+    member_ids = project_member_ids(db, project_id)
     done_cols = list(_column_ids(db, project_id, "done", "realised", "trashed"))
     result: list[ParticipantOut] = []
     for uid in member_ids:
         user = db.get(User, uid)
-        task_ids = [a.task_id for a in db.query(TaskAssignee).filter(TaskAssignee.user_id == uid).all()]
+        task_ids = [a.task_id for a in db.query(TaskAssignee).join(Task, Task.id == TaskAssignee.task_id)
+                    .filter(TaskAssignee.user_id == uid, Task.project_id == project_id).all()]
         running = (
             db.query(TaskTimer).filter(TaskTimer.task_id.in_(task_ids), TaskTimer.state == "running").all()
             if task_ids
@@ -107,7 +106,7 @@ def participants(db: Session, project_id: int) -> list[ParticipantOut]:
                 login=user.login,
                 display_name=user.display_name,
                 telegram_username=user.telegram_username,
-                traffic_status=traffic_status(db, "user", user.id),
+                traffic_status=traffic_status(db, "user", user.id, project_id),
                 active_tasks=active_tasks,
                 active_timer_seconds=sum(current_elapsed(t) for t in running),
             )

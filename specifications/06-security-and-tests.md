@@ -12,7 +12,7 @@
 
 ## Набор тестов
 
-- Unit: права, последний admin, таймеры, пересечения, переходы, инциденты, rate limit, backup.
+- Unit: права, последний admin, таймеры, пересечения, переходы, инциденты, rate limit, backup. Регрессии стабилизации: `test_migrations.py` — заполненная SQLite; `test_dashboard.py` — счётчики в границах проекта; `frontend/tests/incidents.test.mjs` (`npm test`) — рендер формы инцидента. `npm run build` включает проверку TypeScript.
 - API: вход, роли, задачи, документы, ИИ, архивирование, восстановление.
 - Integration: полный цикл на отдельном проекте с mock Telegram/ИИ/Drive.
 - Playwright: вход, Kanban, таймер, жёлтый/красный инцидент, документ, архив.
