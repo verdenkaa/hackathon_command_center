@@ -88,6 +88,22 @@ def patch_project(
     updates = body.model_dump(exclude_unset=True)
     roles = project_roles(db, user.id, project_id)
 
+    if {'start_msk', 'deadline_msk'} & updates.keys():
+        if Role.admin not in roles:
+            raise api_error(403, 'FORBIDDEN', 'Сроки проекта меняет только администратор')
+        start = to_naive_utc(updates['start_msk']) if updates.get('start_msk') else None
+        deadline = to_naive_utc(updates['deadline_msk']) if updates.get('deadline_msk') else None
+        start = start if 'start_msk' in updates else project.start_msk
+        deadline = deadline if 'deadline_msk' in updates else project.deadline_msk
+        if start is not None and deadline is not None and start >= deadline:
+            raise api_error(422, 'INVALID_PROJECT_PERIOD', 'Начало проекта должно быть строго раньше дедлайна')
+        if 'start_msk' in updates:
+            old_start = project.start_msk
+            project.start_msk = start
+            write_audit(db, action='project.start_changed', actor_id=user.id, project_id=project.id,
+                        entity_type='project', entity_id=project.id,
+                        data={'old':old_start.isoformat() if old_start else None, 'new':start.isoformat() if start else None})
+
     if "deadline_msk" in updates:
         if Role.admin not in roles:
             raise api_error(403, "FORBIDDEN", "Дедлайн меняет только администратор")

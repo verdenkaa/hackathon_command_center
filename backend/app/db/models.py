@@ -99,6 +99,7 @@ class Project(Base):
     name: Mapped[str] = mapped_column(String(255))
     incident_counter: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     deadline_msk: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    start_msk: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     state: Mapped[ProjectState] = mapped_column(default=ProjectState.preparation, nullable=False)
     settings: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

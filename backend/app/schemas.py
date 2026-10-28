@@ -82,6 +82,7 @@ class ProjectOut(BaseModel):
     id: int
     name: str
     deadline_msk: datetime | None
+    start_msk: datetime | None
     state: ProjectState
     created_at: datetime
 
@@ -311,6 +312,7 @@ class DeadlinePatch(BaseModel):
 class ProjectPatch(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=255)
     deadline_msk: datetime | None = None
+    start_msk: datetime | None = None
 
 
 class ProjectCreate(BaseModel):

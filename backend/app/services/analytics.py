@@ -19,6 +19,7 @@ from app.db.models import (
     User,
 )
 from app.schemas import ParticipantOut
+from app.operational_schemas import OperationalSummary
 from app.services.incidents import traffic_status
 from app.services.timers import current_elapsed, get_timer, project_calendar_seconds, total_seconds
 from app.timeutil import utcnow
@@ -60,7 +61,7 @@ def kpi(db: Session, project_id: int) -> dict:
         else set()
     )
     estimate = sum(t.estimate_seconds or 0 for t in active_tasks)
-    actual = sum(total_seconds(get_timer(db, t.id)) for t in tasks)
+    actual = sum(total_seconds(get_timer(db, t.id)) for t in active_tasks)
     calendar = project_calendar_seconds(db, project_id)
     progress = round((len(completed) / len(active_tasks) * 100) if active_tasks else 0.0, 1)
     return {
@@ -118,7 +119,8 @@ def module_progress(db: Session, project_id: int) -> list[dict]:
     done_ids = _column_ids(db, project_id, "done", "realised")
     result = []
     for m in db.query(Module).filter(Module.project_id == project_id).all():
-        tasks = db.query(Task).filter(Task.module_id == m.id).all()
+        tasks = db.query(Task).filter(Task.project_id == project_id, Task.module_id == m.id,
+                                     Task.column_id.notin_(_column_ids(db, project_id, 'trashed'))).all()
         done = sum(1 for t in tasks if t.column_id in done_ids)
         result.append(
             {
@@ -180,7 +182,8 @@ def burn_down(db: Session, project_id: int) -> list[dict]:
 
 
 def time_by_user(db: Session, project_id: int) -> list[dict]:
-    tasks = db.query(Task).filter(Task.project_id == project_id).all()
+    tasks = db.query(Task).filter(Task.project_id == project_id,
+                                 Task.column_id.notin_(_column_ids(db, project_id, 'trashed'))).all()
     by_user: dict[int | None, int] = defaultdict(int)
     for t in tasks:
         secs = total_seconds(get_timer(db, t.id))
@@ -221,59 +224,40 @@ def risks(db: Session, project_id: int) -> list[dict]:
     return result
 
 
-def planning(db: Session, project_id: int) -> dict:
-    now = utcnow()
-    tasks = db.query(Task).join(BoardColumn, Task.column_id == BoardColumn.id).filter(Task.project_id == project_id, BoardColumn.semantic != 'trash').all()
-    done = _column_ids(db, project_id, 'done', 'realised')
-    remaining = 0
-    missing = False
+def planning(db: Session, project_id: int, summary: OperationalSummary | None = None) -> dict:
+    """Compatibility fields derived from the same current plan as the operational view."""
+    from app.services.operational import build_summary
+    summary = summary if summary is not None else build_summary(db, project_id)
+    remaining = sum(t.estimate_seconds or 0 for t in summary.tasks if t.availability != 'done')
     deviations = []
-    by_owner: dict[int, int] = defaultdict(int)
-    unassigned = False
-    for task in tasks:
-        timer = get_timer(db, task.id)
-        actual = total_seconds(timer)
-        owners = db.query(TaskAssignee).filter_by(task_id=task.id).all()
-        primary = next((a.user_id for a in owners if a.is_primary), None)
-        if task.column_id not in done:
-            missing |= task.estimate_seconds is None
-            # An exhausted estimate is not evidence that unfinished work is complete.
-            missing |= task.estimate_seconds is not None and actual >= task.estimate_seconds
-            left = max(0, (task.estimate_seconds or 0) - actual)
-            remaining += left
-            if primary is None:
-                unassigned = True
-            else:
-                by_owner[primary] += left
+    now = utcnow()
+    for task in summary.tasks:
+        actual = task.timer.total_seconds if task.timer else 0
         overrun = max(0, actual - task.estimate_seconds) if task.estimate_seconds is not None else 0
-        ahead = max(0, task.estimate_seconds - actual) if task.column_id in done and task.estimate_seconds is not None and timer is not None and timer.state != 'running' else 0
-        overdue = max(0, int((now - task.deadline).total_seconds())) if task.column_id not in done and task.deadline else 0
-        if overrun or ahead or overdue:
+        overdue = max(0, int((now-task.deadline).total_seconds())) if task.availability != 'done' and task.deadline else 0
+        if overrun or overdue:
             deviations.append({'task_id':task.id, 'title':task.title, 'actual_seconds':actual,
-                'overrun_seconds':overrun, 'ahead_seconds':ahead, 'overdue_seconds':overdue,
-                'owners':[db.get(User, a.user_id).display_name for a in owners]})
-    project = db.get(Project, project_id)
-    seconds_left = int((project.deadline_msk - now).total_seconds()) if project.deadline_msk else None
-    duration = max(by_owner.values(), default=0)
-    status, margin = 'insufficient_data', None
-    if seconds_left is not None and not missing and not unassigned:
-        margin = seconds_left - duration
-        status = 'late' if margin < 0 else 'risk' if margin < max(1800, duration * .2) else 'on_track'
-    return {'forecast':{'remaining_seconds':remaining, 'calendar_estimate_seconds':duration,
-        'status':status, 'margin_seconds':margin,
-        'assumptions':'Остаток = сумма max(оценка − факт, 0) незавершённых задач. Прогноз — максимум остатка по основным исполнителям: разные люди работают параллельно, один человек — последовательно. Предполагается непрерывная доступность; зависимости, расписание и работа нескольких людей над одной задачей не моделируются. При исчерпанной или отсутствующей оценке либо без исполнителя данных недостаточно.'},
-        'deviations':deviations}
+                               'overrun_seconds':overrun, 'ahead_seconds':0, 'overdue_seconds':overdue,
+                               'owners':[a.display_name for a in task.assignees]})
+    return {'forecast':{'remaining_seconds':remaining, 'calendar_estimate_seconds':None,
+                        'status':summary.plan.status, 'finish':summary.plan.finish,
+                        'margin_seconds':-summary.plan.deadline_delta_seconds if summary.plan.deadline_delta_seconds is not None else None,
+                        'assumptions':'Текущий план Ганта; таймеры не уменьшают незавершённый объём.'},
+            'deviations':deviations}
 
 
 def analytics(db: Session, project_id: int) -> dict:
+    from app.services.operational import build_summary
+    summary = build_summary(db, project_id)
     incidents = (
         db.query(Incident)
         .filter(Incident.project_id == project_id, Incident.status != "resolved")
         .all()
     )
     return {
+        'summary':summary.model_dump(mode='json'),
         "kpi": kpi(db, project_id),
-        **planning(db, project_id),
+        **planning(db, project_id, summary),
         "participants": [p.model_dump() for p in participants(db, project_id)],
         "modules": module_progress(db, project_id),
         "burn_down": burn_down(db, project_id),

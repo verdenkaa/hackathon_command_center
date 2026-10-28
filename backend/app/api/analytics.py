@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from app.deps import get_current_user, get_db
-from app.schemas import AnalyticsOut
+from app.operational_schemas import OperationalAnalytics as AnalyticsOut
 from app.services.analytics import analytics
 
 router = APIRouter(tags=["analytics"])

@@ -14,6 +14,7 @@ from app.api.errors import api_error
 from app.db.models import (BoardColumn, PlanningBaseline, Module as PlanningLane, PlanningState, Project,
                            Task, TaskAssignee, TaskDependency, TaskPlacement, Incident, IncidentTarget)
 from app.services.tasks import serialize_task
+from app.services.dependencies import pending_blockers
 from app.timeutil import utcnow
 
 now = utcnow
@@ -229,7 +230,7 @@ def read(db: Session, project_id: int) -> dict[str, Any]:
         base = snapshot.get(str(tid))
         base_end = datetime.fromisoformat(base['end']) if base else None
         overdue = bool(t.deadline and t.deadline < now() and columns[t.column_id].semantic != 'done')
-        blocked = any(columns[g['tasks'][s].column_id].semantic != 'done' for s in parents[tid])
+        blocked = bool(pending_blockers(db, t))
         if columns[t.column_id].semantic == 'done' and not t.actual_completed_at:
             limitations.append(f'«{t.title}»: нет достоверного времени завершения')
         if parents[tid] - g['placements'].keys():
@@ -240,7 +241,9 @@ def read(db: Session, project_id: int) -> dict[str, Any]:
                            'planned_end':(p.start+timedelta(seconds=t.estimate_seconds)).isoformat(),
                            'pinned':p.pinned, 'actual_started_at':t.actual_started_at, 'actual_completed_at':t.actual_completed_at,
                            'baseline':base, 'deviation_seconds':int((finish_at-base_end).total_seconds()) if base_end else None,
-                           'blocked':blocked, 'overdue':overdue, 'beyond_deadline':bool(project.deadline_msk and finish_at > project.deadline_msk)})
+                           'blocked':blocked, 'overdue':overdue,
+                           'before_start':bool(project.start_msk and p.start < project.start_msk),
+                           'beyond_deadline':bool(project.deadline_msk and p.start + timedelta(seconds=t.estimate_seconds) > project.deadline_msk)})
     unplaced = set(g['tasks']) - g['placements'].keys()
     if unplaced:
         limitations.append(f'Не размещено задач: {len(unplaced)}; прогноз охватывает только размещённые задачи')
@@ -272,7 +275,7 @@ def read(db: Session, project_id: int) -> dict[str, Any]:
                              .filter(Incident.project_id == project_id, Incident.status != 'resolved', IncidentTarget.target_type == 'module').all()):
         track_incidents.setdefault(target.target_id, []).append({'id':incident.id, 'number':incident.number,
                                                                'title':incident.title, 'level':incident.level, 'status':incident.status})
-    return {'revision':state.revision if state else 0, 'project':{'id':project.id,'name':project.name,'deadline':project.deadline_msk,'state':project.state},
+    return {'revision':state.revision if state else 0, 'project':{'id':project.id,'name':project.name,'start':project.start_msk,'deadline':project.deadline_msk,'state':project.state},
             'lanes':[{'id':l.id,'name':l.name,'position':l.position,'incidents':track_incidents.get(l.id, [])} for l in g['lanes']],
             'tasks':[serialize_task(db,t).model_dump(mode='json') for t in g['tasks'].values()], 'placements':placements, 'edges':g['edges'],
             'unplaced_ids':sorted(unplaced), 'unconnected_ids':sorted(set(g['tasks'])-linked), 'overlaps':overlaps,

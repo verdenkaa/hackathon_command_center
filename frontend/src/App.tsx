@@ -188,7 +188,10 @@ export default function App() {
         {tab === 'board' && <Board key={`${projectId}-${navigationKey}`} me={me} openTaskId={navigation?.type==='task'?navigation.id:null}
           onOpenIncident={id=>{setNavigation({type:'incident',id});setNavigationKey(v=>v+1);setTab('incidents')}}/>}
         {tab === 'incidents' && <Incidents key={`${projectId}-${navigationKey}`} me={me} initialIncident={navigation?.incident} openIncidentId={navigation?.type==='incident'?navigation.id:null} />}
-        {tab === 'analytics' && <Analytics key={projectId} me={me} />}
+        {tab === 'analytics' && <Analytics key={projectId} me={me}
+          onOpenTask={id=>{setNavigation({type:'task',id});setNavigationKey(v=>v+1);setTab('board')}}
+          onOpenIncident={id=>{setNavigation({type:'incident',id});setNavigationKey(v=>v+1);setTab('incidents')}}
+          onPlanning={()=>setTab('planning')}/>}
         {tab === 'planning' && <Planning key={projectId} me={me}/>}
         {tab === 'admin' && isAdmin && <Admin key={projectId} />}
         {tab === 'settings' && <Settings key={projectId} me={me} onProjectsChanged={reloadProjects}

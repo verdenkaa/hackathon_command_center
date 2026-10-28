@@ -73,8 +73,8 @@ def test_analytics_remaining_deviations_and_short_burndown(client):
     task(client, 'Trash', column_key='trashed', estimate_seconds=99999)
     data = client.get('/api/v1/projects/1/analytics').json()
     assert data['kpi']['estimate_seconds'] == 600
-    assert data['forecast']['remaining_seconds'] == 0
-    assert data['forecast']['status'] == 'insufficient_data'
+    assert data['forecast']['remaining_seconds'] == 600
+    assert data['forecast']['status'] == 'no_deadline'
     assert data['deviations'][0]['overrun_seconds'] == 300
     assert len(data['burn_down']) >= 2
     assert 'T' in data['burn_down'][0]['date']

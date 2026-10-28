@@ -20,6 +20,7 @@ export interface Project {
   id: number
   name: string
   deadline_msk: string | null
+  start_msk: string | null
   state: string
   created_at: string
 }
@@ -79,13 +80,13 @@ export interface Placement {
   task_id:number;lane_id:number;start:string;end:string;planned_end:string;pinned:boolean
   actual_started_at:string|null;actual_completed_at:string|null
   baseline:{start:string;end:string;estimate_seconds:number;lane_id:number}|null
-  deviation_seconds:number|null;blocked:boolean;overdue:boolean;beyond_deadline:boolean
+  deviation_seconds:number|null;blocked:boolean;overdue:boolean;beyond_deadline:boolean;before_start:boolean
 }
 export interface PlanEdge {source:number;target:number;task_id:number;predecessor_id:number;type:string}
 export interface PlanningData {
   warnings?:string[]
   revision:number
-  project:{id:number;name:string;deadline:string|null;state:string}
+  project:{id:number;name:string;start:string|null;deadline:string|null;state:string}
   lanes:{id:number;name:string;position:number;incidents?:IncidentSummary[]}[]
   tasks:Task[];placements:Placement[];edges:PlanEdge[]
   unplaced_ids:number[];unconnected_ids:number[]
@@ -229,7 +230,8 @@ export interface Module {
 }
 
 export interface Analytics {
-  forecast: {remaining_seconds:number;calendar_estimate_seconds:number;status:string;margin_seconds:number|null;assumptions:string}
+  summary: OperationalSummary
+  forecast: {remaining_seconds:number;calendar_estimate_seconds:number|null;status:string;finish:string|null;margin_seconds:number|null;assumptions:string}
   deviations: {task_id:number;title:string;actual_seconds:number;overrun_seconds:number;ahead_seconds:number;overdue_seconds:number;owners:string[]}[]
   kpi: {
     project_id: number
@@ -254,6 +256,21 @@ export interface Analytics {
   time_by_user: { user_id: number | null; login: string; display_name: string; seconds: number }[]
   active_incidents: { id: number; number:number; title: string; level: string; status: string }[]
   risks: { type: string; task_id?: number; incident_id?: number; title: string; level?: string; status?: string; deadline?: string | null }[]
+}
+
+export interface Measure {numerator:number;denominator:number;percent:number|null;missing_count:number;incomplete:boolean;unknown_reason:string|null}
+export interface SummaryTask extends Task {track_name:string|null;availability:'done'|'active'|'waiting'|'ready';waiting_reasons:string[];missing:string[]}
+export interface OperationalSummary {
+  project_id:number;generated_at:string;project_state:string
+  period:{start:string|null;deadline:string|null;phase:string;duration_seconds:number|null;elapsed_seconds:number|null;remaining_seconds:number|null;until_start_seconds:number|null;overdue_seconds:number|null;percent:number|null;unknown_reason:string|null}
+  progress:{tasks:Measure;duration:Measure}
+  plan:{status:string;incomplete:boolean;finish:string|null;deadline_delta_seconds:number|null;source:string;covered_tasks:number;total_tasks:number;limitations:string[]}
+  tasks:SummaryTask[]
+  tracks:{id:number|null;name:string;task_ids:number[];done:number;total:number;percent:number|null;active:number;waiting:number;overdue:number;blocked:number;incident_ids:number[]}[]
+  incidents:(IncidentSummary&{source_task_id:number|null;cascade_depth:number;targets:{target_type:string;target_id:number}[];hard_task_ids:number[];potential_task_ids:number[];direct_task_ids:number[];affected_task_ids:number[];track_ids:number[];limitations:string[]})[]
+  participants:{id:number;display_name:string;traffic_status:string;task_ids:number[];active_ids:number[];ready_ids:number[];waiting_ids:number[];incident_ids:number[];overlaps:number[][];downstream:Cascade}[]
+  attention:{code:string;reason:string;task_ids:number[];incident_id:number|null;user_ids:number[]}[]
+  unassigned_ids:number[];limitations:string[]
 }
 
 export interface DashboardKpi {

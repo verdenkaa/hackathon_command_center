@@ -53,9 +53,9 @@ export default function Planning({me}:{me:Me}) {
     inFlight.current=true
     try {
       const next=await api.planning()
-      if(alive.current&&!busyRef.current&&!dragRef.current){setData(previous=>previous&&previous.revision>=next.revision?previous:next);if(!initialized.current){
+      if(alive.current&&!busyRef.current&&!dragRef.current){setData(previous=>previous&&previous.revision>next.revision?previous:next);if(!initialized.current){
         const times=next.placements.map(p=>ms(p.start))
-        setOrigin(Math.floor(Math.min(Date.now(),...times)/HOUR)*HOUR-2*HOUR)
+        setOrigin(Math.floor(Math.min(Date.now(),...(next.project.start?[ms(next.project.start)]:[]),...times)/HOUR)*HOUR-2*HOUR)
         initialized.current=true
       }} else refreshPending.current=true
     } catch(e){if(alive.current)setError((e as Error).message)}
@@ -90,7 +90,7 @@ export default function Planning({me}:{me:Me}) {
   const selectedEdge=edgeIndex==null?null:data?.edges.find(e=>e.source===edgeIndex.source&&e.target===edgeIndex.target)
   const matching=(t:Task)=>!query||`${t.id} ${t.title} ${t.assignees.map(a=>a.display_name).join(' ')}`.toLowerCase().includes(query.toLowerCase())
   const overlapIds=new Set(data?.overlaps.flatMap(o=>o.task_ids))
-  const reviewMatch=(id:number)=>review==='all'||review==='unconnected'&&data?.unconnected_ids.includes(id)||review==='overlaps'&&overlapIds.has(id)||review==='critical'&&data?.forecast.critical_chain.includes(id)||review==='risk'&&data?.placements.some(p=>p.task_id===id&&(p.blocked||p.overdue||p.beyond_deadline))
+  const reviewMatch=(id:number)=>review==='all'||review==='unconnected'&&data?.unconnected_ids.includes(id)||review==='overlaps'&&overlapIds.has(id)||review==='critical'&&data?.forecast.critical_chain.includes(id)||review==='risk'&&data?.placements.some(p=>p.task_id===id&&(p.blocked||p.overdue||p.beyond_deadline||p.before_start))
 
   async function command(op:string,values:Record<string,unknown>={}) {
     if(!data||busyRef.current||!editable)return
@@ -112,7 +112,7 @@ export default function Planning({me}:{me:Me}) {
   }
   function fit() {
     const starts=data?.placements.map(p=>ms(p.start))??[],ends=data?.placements.map(p=>ms(p.planned_end))??[]
-    const start=Math.min(tick,...starts)-HOUR,end=Math.max(tick+HOUR,data?.project.deadline?ms(data.project.deadline):0,...ends)+HOUR
+    const start=Math.min(tick,...(data?.project.start?[ms(data.project.start)]:[]),...starts)-HOUR,end=Math.max(tick+HOUR,data?.project.deadline?ms(data.project.deadline):0,...ends)+HOUR
     setOrigin(Math.floor(start/HOUR)*HOUR);setScale(Math.max(0.5,Math.min(320,((viewport.current?.clientWidth??1000)-LABEL-30)/((end-start)/HOUR))))
     if(viewport.current)viewport.current.scrollLeft=0
   }
@@ -174,6 +174,7 @@ export default function Planning({me}:{me:Me}) {
     </div>
     {error&&<div className="error" role="alert">{error}</div>}{notice&&<span role="status" className="muted">{notice}</span>}
     {!!data.warnings?.length&&<details className="plan-limitations"><summary>Сохранено с замечаниями ({data.warnings.length})</summary><ul>{data.warnings.map((s,i)=><li key={i}>{s}</li>)}</ul></details>}
+    <div className="plan-boundary-legend">МСК (UTC+3) · Начало проекта: {fmtDate(data.project.start)} · Дедлайн: {fmtDate(data.project.deadline)}</div>
     <div className="plan-toolbar">
       <input aria-label="Поиск задач плана" placeholder="Найти задачу или исполнителя…" value={query} onChange={e=>setQuery(e.target.value)}/>
       <select aria-label="Проверка плана" value={review} onChange={e=>setReview(e.target.value)}><option value="all">Все задачи</option><option value="unconnected">Без связей — проверить</option><option value="risk">Блокировки и сроки</option><option value="overlaps">Пересечения исполнителей</option><option value="critical">Критическая цепочка</option></select>
@@ -230,7 +231,7 @@ export default function Planning({me}:{me:Me}) {
               </div>
             </div>
           })}
-          {[{time:tick,label:'Сейчас',kind:'now'},...(data.project.deadline?[{time:ms(data.project.deadline),label:'Дедлайн',kind:'deadline'}]:[])].map(m=><div key={m.kind} className={`gantt-time-marker ${m.kind}`} style={{left:LABEL+(m.time-origin)/HOUR*scale,height}}><span>{m.label}</span></div>)}
+          {[{time:tick,label:'Сейчас',kind:'now'},...(data.project.start?[{time:ms(data.project.start),label:'Начало проекта',kind:'start'}]:[]),...(data.project.deadline?[{time:ms(data.project.deadline),label:'Дедлайн',kind:'deadline'}]:[])].map(m=><div key={m.kind} className={`gantt-time-marker ${m.kind}`} style={{left:LABEL+(m.time-origin)/HOUR*scale,height}}><span>{m.label}</span></div>)}
         </div>
       </div>
       {panel&&chosen&&<aside className="plan-task-panel"><h3>Задача</h3>
@@ -252,7 +253,7 @@ function PlanReview({data,participants,onTask}:{data:PlanningData;participants:P
   return <div className="plan-summary plan-review">
     <section><h3>{data.forecast.limitations.length?'Частичный прогноз':'Прогноз завершения'}</h3><strong>{fmtDate(data.forecast.finish)}</strong><p>К дедлайну: {delta(data.forecast.deadline_delta_seconds)}</p>
       <ul>{data.forecast.limitations.map((s,i)=><li key={i}>{s}</li>)}</ul>
-      {data.placements.filter(p=>p.overdue||p.beyond_deadline).map(p=><p key={p.task_id}>{link(p.task_id)} — {p.overdue?'срок задачи истёк':'выходит за дедлайн проекта'}: {fmtDate(p.planned_end)}</p>)}
+      {data.placements.filter(p=>p.overdue||p.beyond_deadline||p.before_start).map(p=><p key={p.task_id}>{link(p.task_id)} — {[p.overdue?'срок задачи истёк':'',p.before_start?'раньше начала проекта':'',p.beyond_deadline?'выходит за дедлайн проекта':''].filter(Boolean).join(' · ')}: {fmtDate(p.planned_end)}</p>)}
     </section>
     <section><h3>Проверка капитаном</h3><p>{data.unplaced_ids.length} не размещено · {data.unconnected_ids.length} без связей · {data.overlaps.length} пересечений</p>
       {data.overlaps.map((o,i)=>{const a=placements.get(o.task_ids[0])!,b=placements.get(o.task_ids[1])!;return <p key={i}>{link(o.task_ids[0])} пересекается с {link(o.task_ids[1])}<br/>{o.user_ids.map(id=>participants.find(p=>p.id===id)?.display_name??`#${id}`).join(', ')} · {fmtDate(ms(a.start)>ms(b.start)?a.start:b.start)} — {fmtDate(ms(a.planned_end)<ms(b.planned_end)?a.planned_end:b.planned_end)}</p>})}

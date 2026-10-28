@@ -53,6 +53,7 @@ def test_planning_upgrade_keeps_shared_data_and_backfills_only_evidence(tmp_path
         assert db.execute(text('SELECT accumulated_seconds FROM task_timers')).scalar_one() == 1234
         assert db.execute(text('SELECT count(*) FROM task_dependencies')).scalar_one() == 1
         assert db.execute(text('SELECT count(*) FROM task_placements')).scalar_one() == 0
+        assert db.execute(text('SELECT name,start_msk FROM projects')).one() == ('Keep', None)
         assert db.execute(text('SELECT actual_completed_at FROM tasks WHERE id=1')).scalar_one().startswith('2026-10-28 10:00:00')
         assert db.execute(text('SELECT actual_completed_at FROM tasks WHERE id=2')).scalar_one() is None
         assert not db.execute(text('PRAGMA foreign_key_check')).all()

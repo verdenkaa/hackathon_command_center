@@ -40,6 +40,9 @@ function ProjectSection({ isAdmin, isCaptain, setMsg, onProjectsChanged }: {
   const current = (projects ?? []).find((p) => p.id === Number(localStorage.getItem('hcc-project') ?? 1)) ?? projects?.[0]
   const [name, setName] = useState('')
   const [deadline, setDeadline] = useState('')
+  const [start, setStart] = useState('')
+  const [periodError, setPeriodError] = useState('')
+  useEffect(()=>{setStart(toMoscowInput(current?.start_msk ?? null))},[current?.start_msk])
   useEffect(()=>{setDeadline(toMoscowInput(current?.deadline_msk ?? null))},[current?.deadline_msk])
   const [newName, setNewName] = useState('')
 
@@ -76,21 +79,29 @@ function ProjectSection({ isAdmin, isCaptain, setMsg, onProjectsChanged }: {
         </button>
       </div>
       <div className="row">
+        <Field label="Начало проекта (МСК, UTC+3, только администратор)">
+          <input type="datetime-local" value={start} onChange={e=>setStart(e.target.value)} disabled={!isAdmin}/>
+        </Field>
         <Field label="Дедлайн (МСК, только администратор)">
           <input type="datetime-local" value={deadline} onChange={(e) => setDeadline(e.target.value)} disabled={!isAdmin} />
         </Field>
         <button
           className="small"
-          disabled={!isAdmin || !deadline}
+          disabled={!isAdmin}
           onClick={async () => {
-            await api.patchProject({ deadline_msk: fromMoscowInput(deadline) })
-            onProjectsChanged()
-            setMsg('Дедлайн обновлён')
+            setPeriodError('')
+            if(start && deadline && start>=deadline){setPeriodError('Начало проекта должно быть строго раньше дедлайна');return}
+            try {
+              await api.patchProject({ start_msk: start?fromMoscowInput(start):null, deadline_msk: deadline?fromMoscowInput(deadline):null })
+              onProjectsChanged();reloadProjects()
+              setMsg('Сроки проекта обновлены. План задач сохранён.')
+            } catch(e){setPeriodError((e as Error).message)}
           }}
         >
           Сохранить
         </button>
       </div>
+      {periodError&&<p className="error" role="alert">{periodError}</p>}
       {isAdmin && (
         <div className="row" style={{ marginTop: 8 }}>
           <Field label="Создать новый проект">

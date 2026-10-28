@@ -335,3 +335,65 @@ input[type="datetime-local"] { min-width: 180px; color-scheme: dark; }
 .cascade-compact { display:flex; gap:12px; flex-wrap:wrap; margin-top:8px; font-size:12px; color:var(--muted); }
 .cascade-analysis details { margin:8px 0; }
 @media(max-width:800px) { .plan-review { grid-template-columns:1fr; } }
+
+/* Operational sections expose their metrics and task lists immediately. */
+.operational-analytics {display:grid;gap:16px;min-width:0}
+.operational-analytics > .card {min-width:0}
+.analytics-heading {flex-wrap:wrap;justify-content:space-between}
+.analytics-progress-grid {display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:20px}
+.operational-analytics summary {cursor:pointer;line-height:1.6;overflow-wrap:anywhere}
+.attention-row,.summary-task {padding:8px 0;border-bottom:1px solid var(--border);overflow-wrap:anywhere}
+.attention-row button,.summary-task button {margin:3px;white-space:normal;text-align:left}
+.scan-grid,.attention-grid {display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,360px),1fr));gap:14px}
+.scan-card,.attention-item,.availability-column {min-width:0;padding:16px;border:1px solid var(--border);border-radius:8px;background:var(--panel)}
+.scan-card h4,.availability-column h4 {margin:0 0 14px}
+.attention-item {border-left:3px solid var(--warn);display:flex;flex-direction:column;justify-content:space-between;gap:10px}
+.scan-heading,.scan-actions {display:flex;align-items:center;flex-wrap:wrap;gap:6px}
+.scan-heading {justify-content:space-between;margin-bottom:14px}
+.scan-actions button {white-space:normal;text-align:left}
+.scan-stats {display:grid;grid-template-columns:repeat(auto-fit,minmax(85px,1fr));gap:8px;margin:14px 0}
+.scan-stat {display:flex;flex-direction:column;gap:4px;padding:10px;border-radius:6px;background:var(--bg)}
+.scan-stat strong {font-size:22px;font-variant-numeric:tabular-nums}
+.scan-stat span {font-size:12px;color:var(--muted)}
+.tone-good {color:var(--ok)}
+.tone-bad {color:var(--error)}
+.tone-warn {color:var(--warn)}
+.tone-neutral {color:#80baff}
+.incident-impact {border-top:3px solid var(--warn)}
+.incident-impact.is-red {border-top-color:var(--error)}
+.impact-lists {display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,180px),1fr));gap:12px;margin-top:14px}
+.availability-grid {display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;align-items:start}
+.availability-column {border-top:3px solid var(--accent);padding:12px}
+.availability-active {border-top-color:var(--ok)}
+.availability-waiting,.availability-missing {border-top-color:var(--warn)}
+.availability-column h4 {display:flex;justify-content:space-between;gap:8px;align-items:center}
+.scan-count {padding:4px 9px;border-radius:6px;background:var(--bg);font-variant-numeric:tabular-nums}
+.workload-scroll {max-width:100%;overflow-x:auto;border:1px solid var(--border);border-radius:8px}
+.workload-table {width:100%;border-collapse:collapse;min-width:850px}
+.workload-table th,.workload-table td {padding:14px 12px;border-bottom:1px solid var(--border);vertical-align:middle}
+.workload-table thead th {background:var(--bg);font-size:12px;white-space:nowrap}
+.workload-table th:first-child {text-align:left;min-width:170px}
+.workload-table tbody th {position:sticky;left:0;background:var(--panel);z-index:1}
+.workload-table td {text-align:center}
+.workload-table td:last-child {text-align:left;min-width:220px;font-size:12px}
+.workload-table th .badge {margin-top:8px;font-weight:400}
+.workload-value {display:inline-grid;place-items:center;min-width:42px;min-height:38px;border-radius:6px;font-size:22px;font-weight:700;font-variant-numeric:tabular-nums;background:color-mix(in srgb,currentColor 12%,transparent);border:1px solid color-mix(in srgb,currentColor 30%,transparent)}
+.participant-tasks {margin-top:16px}
+.nearest-tasks {display:grid;gap:6px;padding:10px;margin:10px 0;background:var(--bg);border:1px solid var(--border);border-radius:6px;text-align:left}
+.nearest-title {font-size:11px;color:var(--muted)}
+.nearest-task {display:grid;gap:4px;width:100%;padding:8px;text-align:left;white-space:normal;overflow-wrap:anywhere}
+.nearest-task span {font-size:11px;color:var(--muted)}
+.overlap-pairs {display:grid;gap:8px;margin-top:12px}
+.overlap-pair {padding:10px;border-left:3px solid var(--error);background:var(--bg);overflow-wrap:anywhere}
+.overlap-pair button {white-space:normal;text-align:left}
+.attention-section>summary {font-weight:600;font-size:16px}
+.attention-section[open]>summary {margin-bottom:16px}
+.track-tasks {margin-top:12px;border-top:1px solid var(--border);padding-top:10px}
+@media(max-width:1200px){.availability-grid {grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:620px){.availability-grid {grid-template-columns:1fr}.scan-card,.attention-item {padding:12px}}
+.plan-boundary-legend {font-size:12px;padding:8px 0;color:var(--muted)}
+.gantt-time-marker.start {border-color:var(--ok)}
+.gantt-time-marker.start span {background:var(--ok);color:#101820}
+.gantt-time-marker>span {position:sticky;top:50px;display:inline-block;white-space:nowrap}
+@media(max-width:760px){.analytics-progress-grid {grid-template-columns:1fr}.operational-analytics .card {padding:12px}.operational-analytics .row {flex-wrap:wrap}}
+@media(max-width:700px){.topbar nav.tabs {flex-basis:100%!important;min-width:0;flex-wrap:wrap}.topbar .project-select {max-width:100%}}

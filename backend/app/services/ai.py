@@ -47,6 +47,7 @@ def get_settings(db: Session, project_id: int) -> AiSettings:
 
 
 def build_snapshot(db: Session, project_id: int) -> dict:
+    from app.services.operational import build_summary
     project = db.get(Project, project_id)
     if project is None:
         raise api_error(404, 'NOT_FOUND', 'Проект не найден')
@@ -72,6 +73,7 @@ def build_snapshot(db: Session, project_id: int) -> dict:
         .all()
     )
     return {
+        'analytics_summary':build_summary(db, project_id).model_dump(mode='json'),
         "project": project.name,
         "deadline": project.deadline_msk.isoformat() if project.deadline_msk else None,
         "tasks_total": len(tasks),
