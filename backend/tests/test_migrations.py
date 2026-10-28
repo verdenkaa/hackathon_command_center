@@ -28,6 +28,37 @@ def test_column_timer_rules_preserve_existing_columns() -> None:
     engine.dispose()
 
 
+def test_planning_upgrade_keeps_shared_data_and_backfills_only_evidence(tmp_path, monkeypatch) -> None:
+    from alembic import command
+    from alembic.config import Config
+    from app.config import settings
+    backend = Path(__file__).resolve().parents[1]
+    url = f"sqlite:///{(tmp_path / 'planning-upgrade.db').as_posix()}"
+    monkeypatch.setattr(settings, 'database_url', url)
+    cfg = Config(str(backend / 'alembic.ini'))
+    cfg.set_main_option('script_location', str(backend / 'alembic'))
+    command.upgrade(cfg, '20261028_manual_fixes')
+    engine = create_engine(url)
+    with engine.begin() as db:
+        db.execute(text("INSERT INTO projects (id,name,state,settings,created_at,incident_counter) VALUES (1,'Keep','active','{}',CURRENT_TIMESTAMP,0)"))
+        db.execute(text("INSERT INTO board_columns (id,project_id,key,title,position,auto_start_timer,auto_stop_timer,semantic) VALUES (1,1,'done','Done',1,0,0,'done')"))
+        db.execute(text("INSERT INTO tasks (id,project_id,column_id,title,priority,estimate_seconds,tags,version,created_at,updated_at) VALUES (1,1,1,'Keep A','medium',7200,'[]',7,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP),(2,1,1,'Keep B','high',NULL,'[]',3,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)"))
+        db.execute(text("INSERT INTO task_dependencies (task_id,predecessor_id,link_type) VALUES (2,1,'after')"))
+        db.execute(text("INSERT INTO task_timers (task_id,state,accumulated_seconds,created_at,updated_at) VALUES (1,'stopped',1234,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)"))
+        db.execute(text("INSERT INTO timer_segments (task_id,started_at,ended_at) VALUES (1,'2026-10-28 08:00:00','2026-10-28 09:00:00')"))
+        db.execute(text("INSERT INTO audit_entries (project_id,action,entity_type,entity_id,data,created_at) VALUES (1,'task.moved','task','1','{\"to_semantic\":\"done\"}','2026-10-28 10:00:00')"))
+    command.upgrade(cfg, 'head')
+    with engine.connect() as db:
+        assert db.execute(text('SELECT estimate_seconds,version FROM tasks ORDER BY id')).all() == [(7200,7),(None,3)]
+        assert db.execute(text('SELECT accumulated_seconds FROM task_timers')).scalar_one() == 1234
+        assert db.execute(text('SELECT count(*) FROM task_dependencies')).scalar_one() == 1
+        assert db.execute(text('SELECT count(*) FROM task_placements')).scalar_one() == 0
+        assert db.execute(text('SELECT actual_completed_at FROM tasks WHERE id=1')).scalar_one().startswith('2026-10-28 10:00:00')
+        assert db.execute(text('SELECT actual_completed_at FROM tasks WHERE id=2')).scalar_one() is None
+        assert not db.execute(text('PRAGMA foreign_key_check')).all()
+    engine.dispose()
+
+
 def test_upgrade_preserves_legacy_access_and_adds_mock_storage(tmp_path, monkeypatch) -> None:
     from alembic import command
     from alembic.config import Config

@@ -206,6 +206,7 @@ class Module(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), nullable=False, index=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
+    position: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     traffic_status: Mapped[str] = mapped_column(String(16), default="green", nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
@@ -223,11 +224,44 @@ class Task(Base):
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     priority: Mapped[str] = mapped_column(String(16), default="medium", nullable=False)
     estimate_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    actual_started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    actual_completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     deadline: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     tags: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
     version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
+class PlanningState(Base):
+    __tablename__ = 'planning_states'
+    project_id: Mapped[int] = mapped_column(ForeignKey('projects.id'), primary_key=True)
+    revision: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
+
+class PlanningLane(Base):
+    __tablename__ = 'planning_lanes'
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey('projects.id'), index=True)
+    name: Mapped[str] = mapped_column(String(120))
+    position: Mapped[int] = mapped_column(Integer)
+
+
+class TaskPlacement(Base):
+    __tablename__ = 'task_placements'
+    task_id: Mapped[int] = mapped_column(ForeignKey('tasks.id'), primary_key=True)
+    lane_id: Mapped[int | None] = mapped_column(ForeignKey('modules.id'), nullable=True)
+    start: Mapped[datetime] = mapped_column(DateTime)
+    pinned: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class PlanningBaseline(Base):
+    __tablename__ = 'planning_baselines'
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey('projects.id'), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    actor_id: Mapped[int] = mapped_column(ForeignKey('users.id'))
+    snapshot: Mapped[dict] = mapped_column(JSON)
 
 
 class TaskAssignee(Base):

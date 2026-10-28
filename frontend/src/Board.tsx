@@ -1,4 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import {useProjectUpdates} from './realtime'
+import {taskTone,TONE_LABELS,IncidentMark} from './taskVisuals'
 import { api, Column, DashboardKpi, Incident, Me, Module, Participant, Task } from './api'
 import { Badge, Field, Modal, badgeForStatus, fmt, fmtDate, hmToSeconds, parseUTC, secondsToHm, useLoad, PRIORITIES, toMoscowInput, fromMoscowInput, incidentKind, incidentLabel } from './ui'
 
@@ -20,19 +22,9 @@ const semantic = (t:Task) => t.column_semantic ?? (DONE_KEYS.includes(t.column_k
 
 export function unfinishedBlockers(task: Task, tasks: Task[]): Task[] {
   return task.predecessors
-    .filter((p) => p.link_type === 'blocked_by' || p.link_type === 'after')
+    .filter((p) => p.link_type === 'blocked_by')
     .map((p) => tasks.find((t) => t.id === p.task_id))
     .filter((t): t is Task => !!t && !['done','trash'].includes(semantic(t)))
-}
-
-function warnIfBlocked(task: Task, tasks: Task[], columnKey: string, columns:Column[]): boolean {
-  if (columns.find(c=>c.key===columnKey)?.semantic !== 'active') return true
-  const blockers = unfinishedBlockers(task, tasks)
-  if (blockers.length === 0) return true
-  const titles = blockers.map((b) => `«${b.title}»`).join(', ')
-  return window.confirm(
-    `Перед этой задачей нужно выполнить: ${titles}.\nОни ещё не завершены. Приступить всё равно?`,
-  )
 }
 
 export default function Board({ me, openTaskId, onOpenIncident }: { me: Me; openTaskId?:number|null; onOpenIncident?:(id:number)=>void }) {
@@ -48,31 +40,27 @@ export default function Board({ me, openTaskId, onOpenIncident }: { me: Me; open
   const [createOpen, setCreateOpen] = useState(false)
   const [selectedId, setSelectedId] = useState<number | null>(openTaskId ?? null)
   const [draggingId, setDraggingId] = useState<number | null>(null)
+  const draggedTask=useRef<Task|null>(null)
+  const reloadSequence=useRef(0)
   const [error, setError] = useState('')
 
   const reload = useCallback(async () => {
+    const sequence=++reloadSequence.current
     const [c, t, d, i] = await Promise.all([api.columns(), api.tasks(), api.dashboard(), api.incidents()])
+    if(sequence!==reloadSequence.current)return
     setColumns(c)
     setTasks(t)
     setDash(d)
     setIncidents(i)
-    setError('')
   }, [])
+  useProjectUpdates(()=>{reload().catch(e=>setError(e.message))})
 
   useEffect(() => {
     reload().catch((e) => setError(e.message))
   }, [reload])
 
   useEffect(() => {
-    const id = setInterval(() => {
-      Promise.all([api.tasks(), api.dashboard(), api.incidents()])
-        .then(([t, d, i]) => {
-          setTasks(t)
-          setDash(d)
-          setIncidents(i)
-        })
-        .catch(() => {})
-    }, 1000)
+    const id = setInterval(() => {reload().catch(()=>{})}, 30000)
     return () => clearInterval(id)
   }, [])
 
@@ -101,9 +89,8 @@ export default function Board({ me, openTaskId, onOpenIncident }: { me: Me; open
 
   async function handleDrop(columnKey: string) {
     if (draggingId == null) return
-    const task = tasks.find((t) => t.id === draggingId)
+    const task = draggedTask.current
     if (!task || task.column_key === columnKey) return
-    if (!warnIfBlocked(task, tasks, columnKey, columns)) return
     try {
       await api.moveTask(task.id, columnKey, task.version)
       reload()
@@ -171,13 +158,14 @@ export default function Board({ me, openTaskId, onOpenIncident }: { me: Me; open
                 <TaskCard
                   key={task.id}
                   task={task}
+                  tasks={tasks}
                   columns={columns}
                   dragging={draggingId === task.id}
                   blocked={blockedIds.has(task.id)}
                   affected={affectedIds.has(task.id)}
                   onOpen={() => setSelectedId(task.id)}
-                  onDragStart={() => setDraggingId(task.id)}
-                  onDragEnd={() => setDraggingId(null)}
+                  onDragStart={() => {draggedTask.current=task;setDraggingId(task.id)}}
+                  onDragEnd={() => {draggedTask.current=null;setDraggingId(null)}}
                   onTimer={async (action) => {
                     try {
                       await api.timer(task.id, action)
@@ -187,7 +175,6 @@ export default function Board({ me, openTaskId, onOpenIncident }: { me: Me; open
                     }
                   }}
                   onMove={async (key) => {
-                    if (!warnIfBlocked(task, tasks, key, columns)) return
                     try {
                       await api.moveTask(task.id, key, task.version)
                       reload()
@@ -248,8 +235,9 @@ function Kpi({ label, value, warn }: { label: string; value: string | number; wa
   )
 }
 
-export function TaskCard({ task, columns, dragging, blocked, affected, onOpen, onMove, onTimer, onDragStart, onDragEnd }: {
+export function TaskCard({ task, tasks=[task], columns, dragging, blocked, affected, onOpen, onMove, onTimer, onDragStart, onDragEnd }: {
   task: Task
+  tasks?: Task[]
   columns: Column[]
   dragging: boolean
   blocked: boolean
@@ -263,21 +251,21 @@ export function TaskCard({ task, columns, dragging, blocked, affected, onOpen, o
   const running = task.timer?.state === 'running'
   const blockers=task.blocking_incidents ?? []
   const blockKind=blockers.some(i=>incidentKind(i)==='red')?'red':blockers.some(i=>incidentKind(i)==='purple')?'purple':'yellow'
-  const blockColor=blockKind==='purple'?'#a478e5':blockKind==='red'?'var(--error)':'var(--warn)'
   const overdue =
     task.deadline != null &&
     parseUTC(task.deadline) < new Date() &&
     !['done','trash'].includes(semantic(task))
   return (
     <div
-      className={`task-card ${overdue ? 'overdue' : ''}`}
+      className={`task-card tone-${taskTone(task,tasks)}`}
       draggable
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
       onClick={onOpen}
-      style={{ opacity: dragging ? 0.5 : 1, ...(blocked ? { borderColor: blockColor } : affected ? { borderColor: 'var(--warn)' } : {}) }}
+      style={{ opacity: dragging ? 0.5 : 1 }}
     >
-      <div style={{ fontWeight: 500, fontSize: 13 }}>{task.title}</div>
+      <div className="task-title" style={{ fontWeight: 500, fontSize: 13 }}>{task.title}<IncidentMark incidents={blockers}/></div>
+      <small className="task-readiness">{TONE_LABELS[taskTone(task,tasks)]}</small>
       <div className="row" style={{ marginTop: 6, fontSize: 12, flexWrap: 'wrap' }}>
         {blocked && <span className={`badge ${blockKind}`}>заблокирована{blockKind==='purple'?' · Ожидает подтверждения':''}</span>}
         {affected && <span className="badge yellow">затронута</span>}
@@ -327,7 +315,7 @@ export function TaskCard({ task, columns, dragging, blocked, affected, onOpen, o
   )
 }
 
-export function TaskForm({ columns, onClose, onCreated }: { columns: Column[]; onClose: () => void; onCreated: () => void }) {
+export function TaskForm({ columns, onClose, onCreated }: { columns: Column[]; onClose: () => void; onCreated: (taskId:number) => void }) {
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [priority, setPriority] = useState('medium')
@@ -365,7 +353,7 @@ export function TaskForm({ columns, onClose, onCreated }: { columns: Column[]; o
       if (assigneeList.length > 0) {
         await api.setAssignees(created.id, assigneeList)
       }
-      onCreated()
+      onCreated(created.id)
     } catch (err) {
       setError((err as Error).message)
     } finally {
@@ -395,7 +383,7 @@ export function TaskForm({ columns, onClose, onCreated }: { columns: Column[]; o
               {columns.map((col) => <option key={col.key} value={col.key}>{col.title}</option>)}
             </select>
           </Field>
-          <Field label="Модуль">
+          <Field label="Трек">
             <select value={moduleId ?? ''} onChange={(e) => setModuleId(e.target.value ? Number(e.target.value) : null)}>
               <option value="">—</option>
               {modules?.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
@@ -439,9 +427,11 @@ export function TaskForm({ columns, onClose, onCreated }: { columns: Column[]; o
 }
 
 export function TaskPanel({
-  task, tasks, participants, modules, columns, isCaptain, onChange, onClose, onOpenIncident,
+  task, tasks, participants, modules, columns, isCaptain, onChange, onClose, onOpenIncident, readOnly=false, allowBlockingLinks=true,
 }: {
   onOpenIncident?: (id:number)=>void
+  readOnly?: boolean
+  allowBlockingLinks?: boolean
   task: Task
   tasks: Task[]
   participants: Participant[]
@@ -460,7 +450,8 @@ export function TaskPanel({
   const [historyTick, setHistoryTick] = useState(0)
   const [checkText, setCheckText] = useState('')
   const [depId, setDepId] = useState<number | null>(null)
-  const [depType, setDepType] = useState('blocked_by')
+  const [depType, setDepType] = useState(allowBlockingLinks?'blocked_by':'after')
+  const [removeLink,setRemoveLink]=useState<{owner:number;predecessor:number;title:string}|null>(null)
   const [subTitle, setSubTitle] = useState('')
   const [adjustH, setAdjustH] = useState('')
   const [error, setError] = useState('')
@@ -483,11 +474,12 @@ export function TaskPanel({
 
 const REVERSE_LABELS: Record<string, string> = {
   blocked_by: 'блокирует',
-  after: 'перед',
+  after: 'до',
   before: 'после',
 }
 
   async function run(fn: () => Promise<unknown>) {
+    if(readOnly)return
     setError('')
     try {
       await fn()
@@ -510,7 +502,9 @@ const REVERSE_LABELS: Record<string, string> = {
   }
 
   return (
-    <div>
+    <div className="shared-task-panel">
+      <button className="ghost small" style={{float:'right'}} onClick={onClose}>Закрыть</button>
+      <fieldset disabled={readOnly} style={{border:0,padding:0,margin:0,minWidth:0}}>
       <div className="row" style={{ justifyContent: 'space-between' }}>
         <input
           value={title}
@@ -525,7 +519,7 @@ const REVERSE_LABELS: Record<string, string> = {
           }}
           style={{ fontWeight: 600, fontSize: 16, padding: '4px 8px' }}
         />
-        <button className="ghost small" onClick={onClose}>✕</button>
+        {!readOnly && <button className="ghost small" onClick={onClose}>✕</button>}
       </div>
       <div className="row" style={{ margin: '8px 0', flexWrap: 'wrap' }}>
         <Badge kind={badgeForStatus(semantic(task) === 'done' ? 'done' : 'open')}>
@@ -548,7 +542,6 @@ const REVERSE_LABELS: Record<string, string> = {
           <select
             value={task.column_key}
             onChange={(e) => {
-              if (!warnIfBlocked(task, tasks, e.target.value, columns)) return
               run(() => api.moveTask(task.id, e.target.value, task.version))
             }}
           >
@@ -561,7 +554,7 @@ const REVERSE_LABELS: Record<string, string> = {
             value={task.module_id ?? ''}
             onChange={(e) => run(() => api.patchTask(task.id, { module_id: e.target.value ? Number(e.target.value) : null }, task.version))}
           >
-            <option value="">без модуля</option>
+            <option value="">без трека</option>
             {modules.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
           </select>
         </div>
@@ -708,7 +701,7 @@ const REVERSE_LABELS: Record<string, string> = {
               {p.pred.column_semantic === 'trash' ? 'в корзине' : p.pred.column_semantic === 'done' ? 'готово' : 'не завершено'}
             </Badge>
             <span className="grow" />
-            <button className="small ghost" onClick={() => run(() => api.removeDependency(task.id, p.pred.id))}>✕</button>
+            <button className="small ghost" aria-label={`Удалить связь с ${p.pred.title}`} onClick={() => setRemoveLink({owner:task.id,predecessor:p.pred.id,title:p.pred.title})}>✕</button>
           </div>
         ))}
         {predecessors.length === 0 && reverseLinks.length === 0 && (
@@ -721,11 +714,12 @@ const REVERSE_LABELS: Record<string, string> = {
             <Badge kind={semantic(r.dep)==='done' ? 'green' : 'yellow'}>
               {semantic(r.dep)==='done' ? 'готово' : 'не завершено'}
             </Badge>
+            <button className="small ghost" aria-label={`Удалить связь с ${r.dep.title}`} onClick={() => setRemoveLink({owner:r.dep.id,predecessor:task.id,title:r.dep.title})}>✕</button>
           </div>
         ))}
         <div className="row" style={{ marginTop: 6 }}>
           <select value={depType} onChange={(e) => setDepType(e.target.value)} style={{ maxWidth: 170 }}>
-            <option value="blocked_by">заблокирована</option>
+            {allowBlockingLinks&&<option value="blocked_by">заблокирована (blocked by)</option>}
             <option value="after">после</option>
             <option value="before">до</option>
           </select>
@@ -779,6 +773,8 @@ const REVERSE_LABELS: Record<string, string> = {
         </div>
       </div>
 
+      </fieldset>
+      {removeLink&&!readOnly&&<Modal title="Удалить связь?" onClose={()=>setRemoveLink(null)}><p>Удалить связь с «{removeLink.title}»?</p><div className="row"><button onClick={()=>setRemoveLink(null)}>Отмена</button><button className="primary" onClick={async()=>{await run(()=>api.removeDependency(removeLink.owner,removeLink.predecessor));setRemoveLink(null)}}>ОК</button></div></Modal>}
       <div className="section">
         <div className="section-title">История изменений</div>
         <div className="grid" style={{ gap: 6 }}>

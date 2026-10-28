@@ -6,11 +6,14 @@ import { Incidents } from './Incidents'
 import { Analytics } from './Analytics'
 import { Admin } from './Admin'
 import { Settings } from './Settings'
+import Planning from './Planning'
+import {PlanningPreviewHost} from './PlanningPreview'
 
-type Tab = 'board' | 'incidents' | 'analytics' | 'admin' | 'settings'
+type Tab = 'board' | 'planning' | 'incidents' | 'analytics' | 'admin' | 'settings'
 
 const TABS: { key: Tab; label: string }[] = [
   { key: 'board', label: 'Доска' },
+  { key: 'planning', label: 'Планирование' },
   { key: 'incidents', label: 'Инциденты' },
   { key: 'analytics', label: 'Аналитика' },
   { key: 'admin', label: 'Админ' },
@@ -95,6 +98,7 @@ export default function App() {
 
   return (
     <div style={{ padding: '0 16px 24px' }}>
+      <PlanningPreviewHost/>
       <div className="topbar" style={{ paddingTop: 12 }}>
         <span className="brand" style={{ color: 'var(--accent)' }}>Hackathon Command Center</span>
         <select className="project-select" value={projectId} onChange={(e) => switchProject(Number(e.target.value))}>
@@ -185,6 +189,7 @@ export default function App() {
           onOpenIncident={id=>{setNavigation({type:'incident',id});setNavigationKey(v=>v+1);setTab('incidents')}}/>}
         {tab === 'incidents' && <Incidents key={`${projectId}-${navigationKey}`} me={me} initialIncident={navigation?.incident} openIncidentId={navigation?.type==='incident'?navigation.id:null} />}
         {tab === 'analytics' && <Analytics key={projectId} me={me} />}
+        {tab === 'planning' && <Planning key={projectId} me={me}/>}
         {tab === 'admin' && isAdmin && <Admin key={projectId} />}
         {tab === 'settings' && <Settings key={projectId} me={me} onProjectsChanged={reloadProjects}
           onOpenProject={(id, view) => {switchProject(id);setTab(view)}} />}

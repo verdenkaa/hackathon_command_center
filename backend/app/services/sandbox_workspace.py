@@ -14,7 +14,7 @@ from app.config import settings
 from app.db.models import (Project, ProjectState, Task, BoardColumn, Module, TaskAssignee,
     TaskDependency, ChecklistItem, TaskTimer, TimerSegment, Incident, IncidentTarget, IncidentEvent,
     Document, DocumentLock, AuditEntry, AuditRevision, Notification, AiSettings, AiRecommendation,
-    TelegramDelivery, CompletionVote, SandboxRun, User)
+    TelegramDelivery, CompletionVote, SandboxRun, User, TaskPlacement, PlanningLane, PlanningBaseline, PlanningState)
 from app.services.audit import write_audit
 from app.services.board import create_default_columns
 
@@ -81,6 +81,7 @@ def reset_workspace(db: Session, project_id: int, actor_id: int) -> Path:
             shutil.move(str(documents), str(saved_documents))
             moved = True
         for model, condition in [
+            (TaskPlacement, TaskPlacement.task_id.in_(task_ids)),
             (TaskDependency, TaskDependency.task_id.in_(task_ids)),
             (TaskAssignee, TaskAssignee.task_id.in_(task_ids)), (ChecklistItem, ChecklistItem.task_id.in_(task_ids)),
             (TimerSegment, TimerSegment.task_id.in_(task_ids)), (TaskTimer, TaskTimer.task_id.in_(task_ids)),
@@ -90,10 +91,11 @@ def reset_workspace(db: Session, project_id: int, actor_id: int) -> Path:
             (AuditRevision, AuditRevision.audit_entry_id.in_(audit_ids))]:
             db.query(model).filter(condition).delete(synchronize_session=False)
         db.query(Task).filter(Task.project_id == project_id).update({Task.parent_id: None}, synchronize_session=False)
-        for model in [Task, Incident, Document, Notification, TelegramDelivery, AiRecommendation,
+        for model in [PlanningBaseline, PlanningLane, Task, Incident, Document, Notification, TelegramDelivery, AiRecommendation,
                       AiSettings, CompletionVote, AuditEntry, Module, BoardColumn]:
             db.query(model).filter(model.project_id == project_id).delete(synchronize_session=False)
         db.query(SandboxRun).delete(synchronize_session=False)
+        db.query(PlanningState).filter_by(project_id=project_id).update({PlanningState.revision:PlanningState.revision+1}, synchronize_session=False)
         project.state = ProjectState.active
         project.deadline_msk = None
         project.settings = {'sandbox': True, 'sandbox_team': project.settings.get('sandbox_team', {})}

@@ -34,8 +34,13 @@ def _out(timer) -> TimerOut:
 
 @router.post("/tasks/{task_id}/timer/start", response_model=TimerOut)
 def timer_start(task_id: int, db: Session = Depends(get_db), _u=Depends(require_member)) -> TimerOut:
-    _task(db, task_id)
-    return _out(timers.start_timer(db, task_id))
+    from app.services import planning
+    task = _task(db, task_id)
+    change = planning.begin(db, task.project_id)
+    timer = timers.start_timer(db, task_id, commit=False)
+    planning.finish(db, change)
+    db.commit()
+    return _out(timer)
 
 
 @router.post("/tasks/{task_id}/timer/pause", response_model=TimerOut)

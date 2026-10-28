@@ -1,5 +1,7 @@
 # Frontend (as-built)
 
+Дополнение от 28.10.2026: вкладка «Планирование», управление мышью, общая карточка и предпросмотр описаны в [Планировании](../docs/14-planning.md).
+
 Документ описывает фактический SPA-клиент в `frontend/`, а не первоначальный замысел. Источник истины — код; продуктовые требования остаются в [../docs/06-UI.md](../docs/06-UI.md) и [../docs/02-functional-requirements.md](../docs/02-functional-requirements.md). Контракты API сверены с `backend/app/api/`; полный справочник — [03-api.md](03-api.md).
 
 Источники: `frontend/src/App.tsx`, `Board.tsx`, `Incidents.tsx`, `Analytics.tsx`, `Admin.tsx`, `Settings.tsx`, `Sandbox.tsx`, `ui.tsx`, `api.ts`, `index.css`, `main.tsx`, `frontend/index.html`, `package.json`, `vite.config.ts`, `tsconfig.json`; для сверки — `backend/app/api/*.py`, `backend/app/schemas.py`, `backend/app/deps.py`.

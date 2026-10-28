@@ -1,5 +1,7 @@
 # 03. HTTP API (as-built)
 
+Дополнение от 28.10.2026: `GET/POST /projects/{project_id}/planning`, версии и `PLANNING_PREVIEW` описаны в [Планировании](../docs/14-planning.md). Общие изменения задач и связей также запускают пересчёт; циклы теперь запрещены.
+
 Документ описывает фактический HTTP-контракт backend: 86 обработчиков под `/api/v1` плюс `GET /health`. Источники: `backend/app/main.py`, `backend/app/api/*.py`, `backend/app/deps.py`, `backend/app/schemas.py`, `backend/app/api/errors.py`, `backend/app/services/*.py`, `frontend/src/api.ts`, `backend/tests/*.py`. Если документ и код расходятся, источником истины считается код; расхождения вынесены в раздел 8.
 
 Смежные документы: [02-data-model.md](02-data-model.md), [04-frontend.md](04-frontend.md), [05-jobs-and-integrations.md](05-jobs-and-integrations.md), [06-security-and-tests.md](06-security-and-tests.md), [известные пробелы](../docs/10-known-gaps-and-roadmap.md), [статус реализации](../docs/07-implementation-status.md).

@@ -22,11 +22,14 @@ from app.api import (
     projects,
     sandbox,
     tasks,
+    planning,
+    realtime,
     timers,
 )
 from app.api.errors import register_error_handlers
 from app.config import settings
 from app.db.session import SessionLocal
+from app.services import realtime as _realtime  # Register transactional change tracking.
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 
@@ -111,6 +114,8 @@ def create_app() -> FastAPI:
     app.include_router(audit.router, prefix="/api/v1")
     app.include_router(projects.router, prefix="/api/v1")
     app.include_router(tasks.router, prefix="/api/v1")
+    app.include_router(planning.router, prefix="/api/v1")
+    app.include_router(realtime.router, prefix="/api/v1")
     app.include_router(timers.router, prefix="/api/v1")
     app.include_router(dashboard.router, prefix="/api/v1")
     app.include_router(incidents.router, prefix="/api/v1")

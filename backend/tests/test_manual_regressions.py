@@ -123,9 +123,11 @@ def test_concurrent_incident_numbers_are_unique_and_not_reused(client):
 def test_branching_cycles_trash_and_project_boundaries(client):
     login(client)
     a,b,c,d,trash = [task(client,name) for name in ['a','b','c','d','trash']]
-    for child,parent in [(b,a),(c,a),(d,b),(d,c),(a,d),(trash,a)]:
+    for child,parent in [(b,a),(c,a),(d,b),(d,c),(trash,a)]:
         assert client.post(f"/api/v1/tasks/{child['id']}/dependencies", json={'predecessor_id':parent['id']}).status_code == 200
-    client.post(f"/api/v1/tasks/{trash['id']}/move", json={'version':1,'column_key':'trashed'})
+    assert client.post(f"/api/v1/tasks/{a['id']}/dependencies", json={'predecessor_id':d['id']}).status_code == 422
+    current = client.get(f"/api/v1/tasks/{trash['id']}").json()
+    client.post(f"/api/v1/tasks/{trash['id']}/move", json={'version':current['version'],'column_key':'trashed'})
     impact = client.get(f"/api/v1/tasks/{a['id']}/incident-impact?depth=100").json()
     assert impact['task_ids'] == [a['id'],b['id'],c['id'],d['id']]
     pid = client.post('/api/v1/projects',json={'name':'Foreign'}).json()['id']

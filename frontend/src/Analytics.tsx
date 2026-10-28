@@ -50,7 +50,7 @@ export function Analytics({ me }: { me: Me }) {
 
       <div className="grid analytics-grid" style={{ gridTemplateColumns: '1fr 1fr', gap: 16, marginTop: 16 }}>
         <div className="card">
-          <div className="section-title">Модули</div>
+          <div className="section-title">Треки</div>
           <BarList
             items={data.modules.map((m) => ({
               label: `${m.name} (${m.done}/${m.total})`,

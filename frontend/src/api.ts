@@ -1,3 +1,5 @@
+import {approvePlan,Preview} from './PlanningPreview'
+
 export interface Role {
   id: number
   role: string
@@ -47,6 +49,8 @@ export interface Timer {
 }
 
 export interface Task {
+  actual_started_at?:string|null
+  actual_completed_at?:string|null
   id: number
   project_id: number
   column_id: number
@@ -71,9 +75,31 @@ export interface Task {
   timer: Timer | null
 }
 
+export interface Placement {
+  task_id:number;lane_id:number;start:string;end:string;planned_end:string;pinned:boolean
+  actual_started_at:string|null;actual_completed_at:string|null
+  baseline:{start:string;end:string;estimate_seconds:number;lane_id:number}|null
+  deviation_seconds:number|null;blocked:boolean;overdue:boolean;beyond_deadline:boolean
+}
+export interface PlanEdge {source:number;target:number;task_id:number;predecessor_id:number;type:string}
+export interface PlanningData {
+  warnings?:string[]
+  revision:number
+  project:{id:number;name:string;deadline:string|null;state:string}
+  lanes:{id:number;name:string;position:number;incidents?:IncidentSummary[]}[]
+  tasks:Task[];placements:Placement[];edges:PlanEdge[]
+  unplaced_ids:number[];unconnected_ids:number[]
+  overlaps:{task_ids:number[];user_ids:number[]}[]
+  baseline:{id:number;created_at:string}|null;baseline_count:number
+  forecast:{finish:string|null;deadline_delta_seconds:number|null;critical_chain:number[];limitations:string[]}
+}
+
 export interface IncidentSummary { id:number; number:number; title:string; level:string; status:string }
 
 export interface Incident {
+  source_task_id?:number|null
+  cascade_depth?:number
+  cascade?:Cascade|null
   id: number
   number: number
   project_id: number
@@ -92,6 +118,13 @@ export interface Incident {
   age_seconds: number
   targets: { target_type: string; target_id: number }[]
   events: { id: number; actor_id: number | null; event_type: string; data: Record<string, unknown>; created_at: string }[]
+}
+
+export interface Cascade {
+  source_ids:number[]
+  levels:{depth:number;hard_task_ids:number[];potential_task_ids:number[];new_hard_count:number;new_potential_count:number;user_ids:number[];track_ids:number[];start:string|null;end:string|null}[]
+  scenarios:{delay_seconds:number;task_ids:number[];finish_shift_seconds:number}[]
+  limitations:string[]
 }
 
 export interface Notification {
@@ -248,7 +281,7 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+async function request<T>(path: string, init?: RequestInit, previewAttempt=0): Promise<T> {
   const res = await fetch(path, {
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
@@ -261,12 +294,21 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       const body = await res.json()
       code = body?.error?.code ?? code
       message = body?.error?.message ?? message
-    } catch {
+      if(code==='PLANNING_PREVIEW' && previewAttempt<3) {
+        const preview=body.error.details as Preview
+        if(await approvePlan(preview)) return request<T>(path,{...init,headers:{'Content-Type':'application/json',...init?.headers,'X-Planning-Confirm':preview.token}},previewAttempt+1)
+        throw new ApiError(409,'CANCELLED','Изменение отменено')
+      }
+    } catch (e) {
+      if(e instanceof ApiError)throw e
       /* ignore */
     }
+    if(code==='VERSION_CONFLICT')window.dispatchEvent(new Event('project-updated'))
     throw new ApiError(res.status, code, message)
   }
-  return res.json()
+  const body=await res.json()
+  if(init?.method && !['GET','HEAD'].includes(init.method))window.dispatchEvent(new Event('project-updated'))
+  return body
 }
 
 export function currentProject(): number {
@@ -283,6 +325,8 @@ function pid() {
 }
 
 export const api = {
+  planning: ():Promise<PlanningData> => request(`/api/v1/projects/${pid()}/planning`),
+  planCommand: (revision:number,op:string,values:Record<string,unknown>={}):Promise<PlanningData> => request(`/api/v1/projects/${pid()}/planning`,{method:'POST',body:JSON.stringify({revision,op,...values})}),
   login: (login: string, password: string) =>
     request('/api/v1/auth/login', { method: 'POST', body: JSON.stringify({ login, password }) }),
   logout: () => request('/api/v1/auth/logout', { method: 'POST' }),
@@ -315,6 +359,7 @@ export const api = {
 
   task: (id:number): Promise<Task> => request(`/api/v1/tasks/${id}`),
   incidentImpact: (id:number, depth:number): Promise<{task_ids:number[];user_ids:number[]}> => request(`/api/v1/tasks/${id}/incident-impact?depth=${depth}`),
+  incidentCascade: (id:number):Promise<Cascade> => request(`/api/v1/tasks/${id}/incident-cascade`),
   tasks: (): Promise<Task[]> => request(`/api/v1/projects/${pid()}/tasks`),
   createTask: (payload: Record<string, unknown>): Promise<Task> =>
     request(`/api/v1/projects/${pid()}/tasks`, { method: 'POST', body: JSON.stringify(payload) }),

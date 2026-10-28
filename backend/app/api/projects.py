@@ -264,10 +264,12 @@ def patch_module(
 
 @router.delete("/modules/{module_id}")
 def delete_module(module_id: int, db: Session = Depends(get_db), user: User = Depends(require_member)) -> dict:
+    from app.db.models import TaskPlacement
     module = db.get(Module, module_id)
     if module is None:
         raise api_error(404, "NOT_FOUND", "Модуль не найден")
     db.query(Task).filter(Task.module_id == module_id).update({Task.module_id: None})
+    db.query(TaskPlacement).filter(TaskPlacement.lane_id == module_id).update({TaskPlacement.lane_id: None})
     db.delete(module)
     write_audit(db, action="module.deleted", actor_id=user.id, project_id=module.project_id, entity_type="module", entity_id=module_id)
     db.commit()

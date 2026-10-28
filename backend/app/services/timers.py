@@ -29,11 +29,18 @@ def total_seconds(timer: TaskTimer | None) -> int:
     return timer.accumulated_seconds + current_elapsed(timer)
 
 
-def start_timer(db: Session, task_id: int) -> TaskTimer:
+def start_timer(db: Session, task_id: int, *, commit: bool = True) -> TaskTimer:
+    from app.services.dependencies import require_ready
+    task = db.get(Task, task_id)
+    if task:
+        require_ready(db, task)
     timer = get_timer(db, task_id)
     if timer and timer.state == "running":
         raise api_error(409, "TIMER_RUNNING", "Таймер уже запущен")
     now = _now()
+    task = db.get(Task, task_id)
+    if task and task.actual_started_at is None:
+        task.actual_started_at = now
     if timer is None:
         timer = TaskTimer(task_id=task_id, state="running", accumulated_seconds=0, last_started_at=now)
         db.add(timer)
@@ -41,8 +48,11 @@ def start_timer(db: Session, task_id: int) -> TaskTimer:
         timer.state = "running"
         timer.last_started_at = now
     db.add(TimerSegment(task_id=task_id, started_at=now))
-    db.commit()
-    db.refresh(timer)
+    if commit:
+        db.commit()
+        db.refresh(timer)
+    else:
+        db.flush()
     return timer
 
 
@@ -70,7 +80,7 @@ def pause_timer(db: Session, task_id: int) -> TaskTimer:
     return timer
 
 
-def stop_timer(db: Session, task_id: int) -> TaskTimer:
+def stop_timer(db: Session, task_id: int, *, commit: bool = True) -> TaskTimer:
     timer = get_timer(db, task_id)
     if timer is None or timer.state == "stopped":
         raise api_error(409, "TIMER_NOT_ACTIVE", "Таймер не активен")
@@ -78,8 +88,11 @@ def stop_timer(db: Session, task_id: int) -> TaskTimer:
         _close_running_segment(db, task_id, timer, _now())
         timer.last_started_at = None
     timer.state = "stopped"
-    db.commit()
-    db.refresh(timer)
+    if commit:
+        db.commit()
+        db.refresh(timer)
+    else:
+        db.flush()
     return timer
 
 

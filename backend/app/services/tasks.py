@@ -55,6 +55,8 @@ def serialize_task(db: Session, task: Task) -> TaskOut:
         )
 
     return TaskOut(
+        actual_started_at=task.actual_started_at,
+        actual_completed_at=task.actual_completed_at,
         id=task.id,
         project_id=task.project_id,
         column_id=task.column_id,

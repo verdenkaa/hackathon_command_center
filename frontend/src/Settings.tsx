@@ -245,10 +245,10 @@ function ModulesSection({ setMsg }: { setMsg: (s: string) => void }) {
 
   return (
     <div className="card section">
-      <div className="section-title">Модули</div>
+      <div className="section-title">Треки</div>
       {error && <div className="error">{error}</div>}
       <div className="row" style={{ marginBottom: 8 }}>
-        <input placeholder="Название модуля" value={name} onChange={(e) => setName(e.target.value)} style={{ maxWidth: 220 }} />
+        <input placeholder="Название трека" value={name} onChange={(e) => setName(e.target.value)} style={{ maxWidth: 220 }} />
         <input placeholder="Описание (необязательно)" value={desc} onChange={(e) => setDesc(e.target.value)} />
         <button
           className="primary small"
@@ -257,10 +257,10 @@ function ModulesSection({ setMsg }: { setMsg: (s: string) => void }) {
             await api.createModule(name.trim(), desc)
             setName(''); setDesc('')
             reload()
-            setMsg('Модуль создан')
+            setMsg('Трек создан')
           }}
         >
-          + Модуль
+          + Трек
         </button>
       </div>
       <table>
@@ -277,7 +277,7 @@ function ModulesSection({ setMsg }: { setMsg: (s: string) => void }) {
                     if (e.target.value.trim() && e.target.value !== m.name) {
                       await api.patchModule(m.id, { name: e.target.value.trim() })
                       reload()
-                      setMsg('Модуль переименован')
+                      setMsg('Трек переименован')
                     }
                   }}
                   style={{ border: 'none', background: 'transparent', padding: 0 }}
@@ -289,10 +289,10 @@ function ModulesSection({ setMsg }: { setMsg: (s: string) => void }) {
                 <button
                   className="small danger"
                   onClick={async () => {
-                    if (confirm(`Удалить модуль «${m.name}»? Задачи останутся без модуля.`)) {
+                    if (confirm(`Удалить трек «${m.name}»? Задачи останутся без трека.`)) {
                       await api.deleteModule(m.id)
                       reload()
-                      setMsg('Модуль удалён')
+                      setMsg('Трек удалён')
                     }
                   }}
                 >

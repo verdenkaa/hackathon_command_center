@@ -59,6 +59,10 @@ def create_incident(
     if body.owner_id is not None and body.owner_id not in members:
         raise api_error(422, "VALIDATION_ERROR", "Ответственный не участник проекта")
     from app.db.models import Task, Module, BoardColumn
+    if body.source_task_id is not None:
+        source = db.get(Task, body.source_task_id)
+        if source is None or source.project_id != project_id or db.get(BoardColumn, source.column_id).semantic == 'trash':
+            raise api_error(422, 'INVALID_SOURCE', 'Выберите исходную задачу этого проекта вне корзины')
     body.targets = list({(t.target_type, t.target_id):t for t in body.targets}.values())
     for target in body.targets:
         if target.target_type == 'user':
@@ -88,6 +92,8 @@ def create_incident(
         urgency=body.urgency,
         owner_id=body.owner_id,
         targets=body.targets,
+        source_task_id=body.source_task_id,
+        cascade_depth=body.cascade_depth,
     )
 
     payload = {"incident_id": incident.id, "title": incident.title, "level": incident.level}

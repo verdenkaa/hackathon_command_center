@@ -7,6 +7,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.db.models import ProjectState, Role
+from app.cascade_schemas import CascadeOut
 
 
 class ErrorBody(BaseModel):
@@ -254,10 +255,13 @@ class TaskMove(BaseModel):
 
 
 class TaskOut(BaseModel):
+    actual_started_at: datetime | None = None
+    actual_completed_at: datetime | None = None
     id: int
     project_id: int
     column_id: int
     column_key: str
+    column_title: str = ''
     column_semantic: str = 'normal'
     blocking_incidents: list[dict] = Field(default_factory=list)
     module_id: int | None
@@ -350,6 +354,8 @@ class IncidentTargetIn(BaseModel):
 
 
 class IncidentCreate(BaseModel):
+    source_task_id: int | None = None
+    cascade_depth: int = Field(default=1, ge=1, le=100)
     level: str
     title: str = Field(min_length=1, max_length=255)
     description: str | None = None
@@ -378,6 +384,9 @@ class IncidentEventOut(BaseModel):
 
 
 class IncidentOut(BaseModel):
+    source_task_id: int | None = None
+    cascade_depth: int = 1
+    cascade: 'CascadeOut | None' = None
     id: int
     number: int
     project_id: int

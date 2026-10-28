@@ -1,7 +1,7 @@
 """Задачи: CRUD, перемещение, исполнители, зависимости, чек-лист."""
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Header
 from sqlalchemy.orm import Session
 
 from app.api.errors import api_error
@@ -32,9 +32,20 @@ from app.services.history import history_text as _history_text
 from app.services.board import get_column_by_key
 from app.services.notifications import notify_users
 from app.services.tasks import serialize_task
+from app.services import planning
 from app.timeutil import to_naive_utc
+from app.cascade_schemas import CascadeOut
 
 router = APIRouter(tags=["tasks"])
+
+
+@router.get('/tasks/{task_id}/incident-cascade', response_model=CascadeOut)
+def incident_cascade(task_id: int, db: Session = Depends(get_db), _u=Depends(require_member)) -> CascadeOut:
+    from app.services.cascade import analyse
+    task = _get_task(db, task_id)
+    if db.get(BoardColumn, task.column_id).semantic == 'trash':
+        raise api_error(422, 'TASK_TRASHED', 'Исходная задача находится в корзине')
+    return analyse(db, task.project_id, [task_id])
 
 
 @router.get('/tasks/{task_id}/incident-impact')
@@ -120,6 +131,7 @@ def create_task(
     user: User = Depends(require_member),
 ) -> TaskOut:
     ensure_project_active(db, project_id)
+    plan_change = planning.begin(db, project_id)
     if body.column_key == 'backlog' and not db.query(BoardColumn).filter_by(project_id=project_id, key='backlog').first():
         column = db.query(BoardColumn).filter(BoardColumn.project_id == project_id, BoardColumn.semantic.notin_(['done', 'trash'])).order_by(BoardColumn.position).first()
         column = column or db.query(BoardColumn).filter_by(project_id=project_id).order_by(BoardColumn.position).first()
@@ -148,6 +160,8 @@ def create_task(
     )
     db.add(task)
     db.flush()
+    planning.assign_track(db, task)
+    planning.finish(db, plan_change)
     write_audit(db, action="task.created", actor_id=user.id, project_id=project_id, entity_type="task", entity_id=task.id,
                 data={"title": task.title, 'column_semantic':column.semantic})
     db.commit()
@@ -188,8 +202,11 @@ def patch_task(
     body: TaskPatch,
     db: Session = Depends(get_db),
     user: User = Depends(require_member),
+    x_planning_confirm: str | None = Header(None),
 ) -> TaskOut:
     task = _get_task(db, task_id)
+    plan_change = planning.begin(db, task.project_id)
+    db.refresh(task)
     _check_version(task, body.version)
     updates = body.model_dump(exclude_unset=True, exclude={"version"})
     changes = {field: {'old': str(getattr(task, field)) if field == 'deadline' and getattr(task, field) else getattr(task, field),
@@ -211,6 +228,15 @@ def patch_task(
     for field, value in updates.items():
         setattr(task, field, value)
     task.version += 1
+    if 'module_id' in updates or 'estimate_seconds' in updates:
+        planning.assign_track(db, task)
+    if 'deadline' in updates and task.deadline is not None:
+        from app.db.models import TaskPlacement
+        from datetime import timedelta
+        placement = db.get(TaskPlacement, task.id)
+        if placement and placement.lane_id is not None:
+            placement.start = task.deadline - timedelta(seconds=task.estimate_seconds or 3600)
+    planning.finish(db, plan_change, x_planning_confirm)
     write_audit(db, action="task.updated", actor_id=user.id, project_id=task.project_id, entity_type="task", entity_id=task.id, data={'changes':changes})
     db.commit()
     db.refresh(task)
@@ -223,15 +249,28 @@ def move_task(
     body: TaskMove,
     db: Session = Depends(get_db),
     user: User = Depends(require_member),
+    x_planning_confirm: str | None = Header(None),
 ) -> TaskOut:
     task = _get_task(db, task_id)
+    plan_change = planning.begin(db, task.project_id)
+    db.refresh(task)
     ensure_project_active(db, task.project_id)
     _check_version(task, body.version)
     column = get_column_by_key(db, task.project_id, body.column_key)
+    if column.semantic in {'active', 'done'} or column.auto_start_timer:
+        from app.services.dependencies import require_ready
+        require_ready(db, task)
     old = task.column_id
     old_column = db.get(BoardColumn, old)
     task.column_id = column.id
     task.version += 1
+    if column.semantic == 'done' and task.actual_completed_at is None:
+        task.actual_completed_at = planning.now()
+    elif column.semantic not in {'done', 'trash'} and task.actual_completed_at is not None:
+        task.actual_completed_at = None
+    if column.semantic == 'active' and task.actual_started_at is None:
+        task.actual_started_at = planning.now()
+    planning.finish(db, plan_change, x_planning_confirm)
     write_audit(db, action="task.moved", actor_id=user.id, project_id=task.project_id, entity_type="task", entity_id=task.id,
                 data={"from_column": old, "to_column": column.id, "key": body.column_key, 'from_title':old_column.title, 'to_title':column.title, 'from_semantic':old_column.semantic, 'to_semantic':column.semantic})
 
@@ -240,9 +279,9 @@ def move_task(
 
     timer = timers_svc.get_timer(db, task_id)
     if column.auto_start_timer and (timer is None or timer.state != "running"):
-        timers_svc.start_timer(db, task_id)
+        timers_svc.start_timer(db, task_id, commit=False)
     elif column.auto_stop_timer and timer is not None and timer.state == "running":
-        timers_svc.stop_timer(db, task_id)
+        timers_svc.stop_timer(db, task_id, commit=False)
 
     db.commit()
     db.refresh(task)
@@ -295,8 +334,10 @@ def add_dependency(
     body: DependencyCreate,
     db: Session = Depends(get_db),
     user: User = Depends(require_member),
+    x_planning_confirm: str | None = Header(None),
 ) -> TaskOut:
     task = _get_task(db, task_id)
+    plan_change = planning.begin(db, task.project_id)
     ensure_project_active(db, task.project_id)
     if body.predecessor_id == task_id:
         raise api_error(422, "VALIDATION_ERROR", "Задача не может зависеть от самой себя")
@@ -307,11 +348,15 @@ def add_dependency(
         raise api_error(422, "VALIDATION_ERROR", "Предшествующая задача не принадлежит проекту")
     if any(db.get(BoardColumn, t.column_id).semantic == 'trash' for t in (task, predecessor)):
         raise api_error(422, 'TASK_TRASHED', 'Задачи из корзины нельзя добавлять в связи')
+    source, target = (task_id, body.predecessor_id) if body.link_type == 'before' else (body.predecessor_id, task_id)
+    planning.validate_link(db, task.project_id, source, target)
     exists = db.query(TaskDependency).filter(
         TaskDependency.task_id == task_id, TaskDependency.predecessor_id == body.predecessor_id
     ).first()
     if exists is None:
         db.add(TaskDependency(task_id=task_id, predecessor_id=body.predecessor_id, link_type=body.link_type))
+        task.version += 1
+        planning.finish(db, plan_change, x_planning_confirm)
         write_audit(db, action="task.dependency_added", actor_id=user.id, project_id=task.project_id, entity_type="task", entity_id=task.id,
                     data={"predecessor_id": body.predecessor_id, "link_type": body.link_type})
         db.commit()
@@ -324,13 +369,17 @@ def remove_dependency(
     predecessor_id: int,
     db: Session = Depends(get_db),
     user: User = Depends(require_member),
+    x_planning_confirm: str | None = Header(None),
 ) -> TaskOut:
     task = _get_task(db, task_id)
+    plan_change = planning.begin(db, task.project_id)
     row = db.query(TaskDependency).filter(
         TaskDependency.task_id == task_id, TaskDependency.predecessor_id == predecessor_id
     ).first()
     if row is not None:
         db.delete(row)
+        task.version += 1
+        planning.finish(db, plan_change, x_planning_confirm)
         write_audit(db, action="task.dependency_removed", actor_id=user.id, project_id=task.project_id, entity_type="task", entity_id=task.id,
                     data={"predecessor_id": predecessor_id})
         db.commit()
