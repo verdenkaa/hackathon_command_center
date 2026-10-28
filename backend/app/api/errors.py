@@ -4,6 +4,7 @@ from __future__ import annotations
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from fastapi.encoders import jsonable_encoder
 
 from app.schemas import ErrorResponse
 
@@ -35,7 +36,7 @@ def register_error_handlers(app: FastAPI) -> None:
                 "error": {
                     "code": "VALIDATION_ERROR",
                     "message": "Ошибка валидации запроса",
-                    "details": {"errors": exc.errors()},
+                    "details": {"errors": jsonable_encoder(exc.errors(), custom_encoder={ValueError: str})},
                 }
             },
         )

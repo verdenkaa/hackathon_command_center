@@ -51,12 +51,13 @@ def build_snapshot(db: Session, project_id: int) -> dict:
     if project is None:
         raise api_error(404, 'NOT_FOUND', 'Проект не найден')
     columns = {c.id: c.key for c in db.query(BoardColumn).filter(BoardColumn.project_id == project_id).all()}
+    trash_ids = {c.id for c in db.query(BoardColumn).filter_by(project_id=project_id, semantic='trash').all()}
     tasks = [t for t in db.query(Task).filter(Task.project_id == project_id).order_by(Task.id).all()
-             if columns.get(t.column_id) != 'trashed']
+             if t.column_id not in trash_ids]
     done_ids = {
         c.id
         for c in db.query(BoardColumn)
-        .filter(BoardColumn.project_id == project_id, BoardColumn.key.in_(["done", "realised"]))
+        .filter(BoardColumn.project_id == project_id, BoardColumn.semantic == 'done')
         .all()
     }
     now = utcnow()

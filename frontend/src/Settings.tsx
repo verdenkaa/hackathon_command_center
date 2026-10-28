@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api, AiSettings, Me, currentProject } from './api'
-import { Badge, Field, fmtDate, useLoad } from './ui'
+import { Badge, Field, fmtDate, useLoad, Modal, toMoscowInput, fromMoscowInput } from './ui'
 import { AI_TRIGGERS } from './MockAi'
 import { Sandbox } from './Sandbox'
 
@@ -40,6 +40,7 @@ function ProjectSection({ isAdmin, isCaptain, setMsg, onProjectsChanged }: {
   const current = (projects ?? []).find((p) => p.id === Number(localStorage.getItem('hcc-project') ?? 1)) ?? projects?.[0]
   const [name, setName] = useState('')
   const [deadline, setDeadline] = useState('')
+  useEffect(()=>{setDeadline(toMoscowInput(current?.deadline_msk ?? null))},[current?.deadline_msk])
   const [newName, setNewName] = useState('')
 
   useEffect(() => {
@@ -52,7 +53,7 @@ function ProjectSection({ isAdmin, isCaptain, setMsg, onProjectsChanged }: {
       <div className="section-title">Проект</div>
       <div className="row" style={{ marginBottom: 8 }}>
         <Badge kind={current?.state === 'completed' ? 'gray' : current?.state === 'active' ? 'green' : 'blue'}>
-          {current?.state ?? '—'}
+          {{preparation:'Подготовка',active:'В работе',completed:'Завершён'}[current?.state ?? ''] ?? '—'}
         </Badge>
         {current?.deadline_msk && (
           <span className="muted" style={{ fontSize: 13 }}>дедлайн: {fmtDate(current.deadline_msk)}</span>
@@ -75,14 +76,14 @@ function ProjectSection({ isAdmin, isCaptain, setMsg, onProjectsChanged }: {
         </button>
       </div>
       <div className="row">
-        <Field label="Дедлайн (только администратор)">
+        <Field label="Дедлайн (МСК, только администратор)">
           <input type="datetime-local" value={deadline} onChange={(e) => setDeadline(e.target.value)} disabled={!isAdmin} />
         </Field>
         <button
           className="small"
           disabled={!isAdmin || !deadline}
           onClick={async () => {
-            await api.patchProject({ deadline_msk: new Date(deadline).toISOString() })
+            await api.patchProject({ deadline_msk: fromMoscowInput(deadline) })
             onProjectsChanged()
             setMsg('Дедлайн обновлён')
           }}
@@ -117,6 +118,8 @@ function ProjectSection({ isAdmin, isCaptain, setMsg, onProjectsChanged }: {
 function ColumnsSection({ setMsg }: { setMsg: (s: string) => void }) {
   const [columns, error, reload] = useLoad(api.columns)
   const [title, setTitle] = useState('')
+  const [deleting,setDeleting] = useState<{id:number;title:string;count:number}|null>(null)
+  const [destination,setDestination] = useState<number|null>(null)
   const [autoStart, setAutoStart] = useState(false)
   const [autoStop, setAutoStop] = useState(false)
 
@@ -126,14 +129,14 @@ function ColumnsSection({ setMsg }: { setMsg: (s: string) => void }) {
       {error && <div className="error">{error}</div>}
       <p className="muted" style={{ fontSize: 12, margin: '0 0 8px' }}>
         Можно добавлять и удалять свои колонки, задавать правила: авто-старт таймера при попадании задачи в колонку
-        и авто-остановка. Стартовые 9 колонок удалять нельзя.
+        и авто-остановка. Все колонки принадлежат только этому проекту. Назначение колонки определяет завершённость, корзину и аналитику независимо от её названия.
       </p>
       <table>
         <thead>
-          <tr><th>Колонка</th><th>Авто-старт таймера</th><th>Авто-стоп таймера</th><th></th></tr>
+          <tr><th>Колонка</th><th>Авто-старт таймера</th><th>Авто-стоп таймера</th><th>Назначение и порядок</th></tr>
         </thead>
         <tbody>
-          {(columns ?? []).map((c) => (
+          {(columns ?? []).map((c,index) => (
             <tr key={c.id}>
               <td>
                 <input
@@ -174,24 +177,40 @@ function ColumnsSection({ setMsg }: { setMsg: (s: string) => void }) {
                 <button
                   className="small danger"
                   onClick={async () => {
-                    if (confirm(`Удалить колонку «${c.title}»? Её задачи перейдут в Backlog.`)) {
-                      try {
-                        await api.deleteColumn(c.id)
-                        reload()
-                        setMsg('Колонка удалена')
-                      } catch (e) {
-                        setMsg((e as Error).message)
-                      }
-                    }
+                    try {
+                      if((columns?.length ?? 0)<=1){setMsg('Нельзя удалить последнюю колонку: задачам нужна колонка для хранения');return}
+                      const tasks=await api.tasks()
+                      const count=tasks.filter(t=>t.column_id===c.id).length
+                      setDestination(null)
+                      setDeleting({id:c.id,title:c.title,count})
+                    }catch(e){setMsg((e as Error).message)}
                   }}
                 >
                   удалить
                 </button>
+                <select aria-label={`Назначение ${c.title}`} value={c.semantic} onChange={async e=>{try{await api.patchColumn(c.id,{semantic:e.target.value});reload()}catch(e){setMsg((e as Error).message)}}}>
+                  <option value="normal">Очередь</option><option value="active">В работе</option><option value="done">Завершено</option><option value="trash">Корзина</option>
+                </select>
+                <button className="small" disabled={index===0} onClick={async()=>{await api.patchColumn(c.id,{position:index-1});reload()}}>↑</button>
+                <button className="small" disabled={index===(columns?.length ?? 0)-1} onClick={async()=>{await api.patchColumn(c.id,{position:index+1});reload()}}>↓</button>
               </td>
             </tr>
           ))}
         </tbody>
       </table>
+      {deleting && <Modal title={`Удалить колонку «${deleting.title}»?`} onClose={()=>setDeleting(null)}>
+        <p>{deleting.count ? `В колонке ${deleting.count} задач. Выберите другую колонку проекта для переноса. Задачи сохранятся.` : 'Колонка пуста. Подтвердите удаление.'}</p>
+        {deleting.count>0 && <select aria-label="Перенести задачи в" value={destination ?? ''} onChange={e=>setDestination(Number(e.target.value)||null)}>
+          <option value="">Выберите колонку</option>
+          {columns?.filter(c=>c.id!==deleting.id).map(c=><option key={c.id} value={c.id}>{c.title}</option>)}
+        </select>}
+        <div className="row"><button onClick={()=>setDeleting(null)}>Отмена</button>
+          <button className="danger" disabled={deleting.count>0 && destination==null} onClick={async()=>{
+            try{await api.deleteColumn(deleting.id,destination ?? undefined);setDeleting(null);reload();setMsg('Колонка удалена, задачи сохранены')}
+            catch(e){setMsg((e as Error).message);setDeleting(null)}
+          }}>Удалить колонку</button>
+        </div>
+      </Modal>}
       <div className="row" style={{ marginTop: 10 }}>
         <input placeholder="Новая колонка…" value={title} onChange={(e) => setTitle(e.target.value)} style={{ maxWidth: 220 }} />
         <label className="row" style={{ cursor: 'pointer', fontSize: 13 }}>

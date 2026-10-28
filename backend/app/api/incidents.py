@@ -58,7 +58,8 @@ def create_incident(
     members = project_member_ids(db, project_id)
     if body.owner_id is not None and body.owner_id not in members:
         raise api_error(422, "VALIDATION_ERROR", "Ответственный не участник проекта")
-    from app.db.models import Task, Module
+    from app.db.models import Task, Module, BoardColumn
+    body.targets = list({(t.target_type, t.target_id):t for t in body.targets}.values())
     for target in body.targets:
         if target.target_type == 'user':
             valid = target.target_id in members
@@ -66,6 +67,8 @@ def create_incident(
             model = {'task': Task, 'module': Module}.get(target.target_type)
             entity = db.get(model, target.target_id) if model else None
             valid = entity is not None and entity.project_id == project_id
+            if valid and target.target_type == 'task':
+                valid = db.get(BoardColumn, entity.column_id).semantic != 'trash'
         if not valid:
             raise api_error(422, "VALIDATION_ERROR", "Цель не принадлежит проекту")
     if body.level not in ("yellow", "red"):
@@ -94,7 +97,7 @@ def create_incident(
             payload=payload, telegram_text=f"🔴 Запрос на эскалацию: {incident.title}",
         )
     else:
-        recipients = {body.owner_id, *notify_svc.captains(db, project_id)} - {None}
+        recipients = {incident.owner_id, *notify_svc.captains(db, project_id)} - {None}
         notify_svc.notify_users(
             db, project_id=project_id, user_ids=list(recipients), ntype="incident_yellow_created",
             payload=payload, telegram_text=f"🟡 Блокер: {incident.title}",

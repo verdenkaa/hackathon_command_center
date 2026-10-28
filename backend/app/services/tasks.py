@@ -10,6 +10,7 @@ from app.db.models import (
     TaskAssignee,
     TaskDependency,
     User,
+    Incident, IncidentTarget,
 )
 from app.schemas import AssigneeOut, ChecklistItemOut, PredecessorOut, TaskOut, TimerOut
 from app.services.timers import current_elapsed, get_timer
@@ -58,6 +59,11 @@ def serialize_task(db: Session, task: Task) -> TaskOut:
         project_id=task.project_id,
         column_id=task.column_id,
         column_key=column.key if column else "",
+        column_title=column.title if column else 'Колонка недоступна',
+        column_semantic=column.semantic if column else 'normal',
+        blocking_incidents=[{'id':i.id, 'number':i.number, 'title':i.title, 'level':i.level, 'status':i.status}
+                            for i in db.query(Incident).join(IncidentTarget, IncidentTarget.incident_id == Incident.id)
+                            .filter(Incident.project_id == task.project_id, Incident.status != 'resolved', IncidentTarget.target_type == 'task', IncidentTarget.target_id == task.id).all()],
         module_id=task.module_id,
         parent_id=task.parent_id,
         title=task.title,

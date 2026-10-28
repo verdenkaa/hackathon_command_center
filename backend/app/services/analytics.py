@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import timedelta
+from datetime import datetime
 
 from sqlalchemy.orm import Session
 
@@ -29,7 +29,7 @@ def _column_ids(db: Session, project_id: int, *keys: str) -> set[int]:
     return {
         c.id
         for c in db.query(BoardColumn)
-        .filter(BoardColumn.project_id == project_id, BoardColumn.key.in_(keys))
+        .filter(BoardColumn.project_id == project_id, BoardColumn.semantic.in_({'done' if k in ('done','realised') else 'trash' if k == 'trashed' else 'active' if k in ('in_progress','testing','review') else 'normal' for k in keys}))
         .all()
     }
 
@@ -39,10 +39,10 @@ def kpi(db: Session, project_id: int) -> dict:
     now = utcnow()
     tasks = db.query(Task).filter(Task.project_id == project_id).all()
     done_ids = _column_ids(db, project_id, "done", "realised")
-    trashed_id = next(iter(_column_ids(db, project_id, "trashed")), None)
+    trashed_ids = _column_ids(db, project_id, "trashed")
     active_ids = _column_ids(db, project_id, "in_progress", "testing", "review")
 
-    active_tasks = [t for t in tasks if t.column_id != trashed_id]
+    active_tasks = [t for t in tasks if t.column_id not in trashed_ids]
     completed = [t for t in active_tasks if t.column_id in done_ids]
     in_progress = [t for t in active_tasks if t.column_id in active_ids]
     overdue = [
@@ -59,7 +59,7 @@ def kpi(db: Session, project_id: int) -> dict:
         if running_task_ids
         else set()
     )
-    estimate = sum(t.estimate_seconds or 0 for t in tasks)
+    estimate = sum(t.estimate_seconds or 0 for t in active_tasks)
     actual = sum(total_seconds(get_timer(db, t.id)) for t in tasks)
     calendar = project_calendar_seconds(db, project_id)
     progress = round((len(completed) / len(active_tasks) * 100) if active_tasks else 0.0, 1)
@@ -134,45 +134,48 @@ def module_progress(db: Session, project_id: int) -> list[dict]:
 
 
 def burn_down(db: Session, project_id: int) -> list[dict]:
-    created = (
-        db.query(AuditEntry)
-        .filter(AuditEntry.project_id == project_id, AuditEntry.action == "task.created")
-        .order_by(AuditEntry.created_at)
-        .all()
-    )
-    moved = (
-        db.query(AuditEntry)
-        .filter(AuditEntry.project_id == project_id, AuditEntry.action == "task.moved")
-        .order_by(AuditEntry.created_at)
-        .all()
-    )
-    completions: dict[str, object] = {}
-    for m in moved:
-        key = (m.data or {}).get("key")
-        if key in ("done", "realised") and m.entity_id not in completions:
-            completions[m.entity_id] = m.created_at.date()
-
-    created_by_date: dict[object, int] = defaultdict(int)
-    for c in created:
-        created_by_date[c.created_at.date()] += 1
-    completed_by_date: dict[object, int] = defaultdict(int)
-    for d in completions.values():
-        completed_by_date[d] += 1
-
-    today = utcnow().date()
-    if not created_by_date and not completed_by_date:
+    events = db.query(AuditEntry).filter(AuditEntry.project_id == project_id,
+        AuditEntry.action.in_(['task.created', 'task.moved'])).order_by(AuditEntry.created_at, AuditEntry.id).all()
+    if not events:
         return []
-    start = min([*created_by_date.keys(), *completed_by_date.keys()], default=today)
-    result = []
-    cum_c = cum_d = 0
-    d = start
-    while d <= today:
-        cum_c += created_by_date.get(d, 0)
-        cum_d += completed_by_date.get(d, 0)
-        result.append(
-            {"date": d.isoformat(), "created": cum_c, "completed": cum_d, "remaining": max(0, cum_c - cum_d)}
-        )
-        d += timedelta(days=1)
+    states: dict[str, str | None] = {}
+    result: list[dict] = []
+    created_count = 0
+    for event in events:
+        data = event.data or {}
+        if event.action == 'task.created':
+            created_count += 1
+            states[event.entity_id] = data.get('column_semantic')
+        else:
+            if event.entity_id not in states:
+                continue  # Missing creation history cannot be reconstructed reliably.
+            key = data.get('key')
+            semantic = data.get('to_semantic')
+            if semantic is None:
+                col = db.get(BoardColumn, data.get('to_column')) if data.get('to_column') else None
+                semantic = col.semantic if col else ('done' if key in ('done','realised') else 'trash' if key == 'trashed' else 'normal')
+            states[event.entity_id] = semantic
+        if all(v is not None for v in states.values()):
+            point={'date':event.created_at.isoformat(), 'created':created_count,
+                   'completed':sum(v == 'done' for v in states.values()),
+                   'remaining':sum(v not in ('done','trash') for v in states.values())}
+            if result and result[-1]['date']==point['date']:
+                result[-1]=point
+            else:
+                result.append(point)
+    # A current observation is real data; missing historical states are never assumed.
+    # Query per task, retaining duplicates when several tasks share a column.
+    current = [semantic for (semantic,) in db.query(BoardColumn.semantic).join(Task, Task.column_id == BoardColumn.id).filter(Task.project_id == project_id).all()]
+    result.append({'date':utcnow().isoformat(), 'created':len(current), 'completed':current.count('done'),
+                   'remaining':sum(v not in ('done','trash') for v in current), 'observation_only':not result})
+    # A fixed-scope guide is available only if a deadline follows the first observation.
+    project = db.get(Project, project_id)
+    start = datetime.fromisoformat(result[0]['date'])
+    if not result[0].get('observation_only') and project.deadline_msk and project.deadline_msk > start:
+        duration = (project.deadline_msk - start).total_seconds()
+        for point in result:
+            fraction = (datetime.fromisoformat(point['date']) - start).total_seconds() / duration
+            point['ideal'] = max(0, result[0]['remaining'] * (1 - fraction))
     return result
 
 
@@ -202,7 +205,7 @@ def time_by_user(db: Session, project_id: int) -> list[dict]:
 
 def risks(db: Session, project_id: int) -> list[dict]:
     now = utcnow()
-    done_ids = _column_ids(db, project_id, "done", "realised")
+    done_ids = _column_ids(db, project_id, "done", "realised", "trashed")
     tasks = db.query(Task).filter(Task.project_id == project_id, Task.column_id.notin_(done_ids)).all()
     result = [
         {"type": "overdue", "task_id": t.id, "title": t.title,
@@ -218,6 +221,50 @@ def risks(db: Session, project_id: int) -> list[dict]:
     return result
 
 
+def planning(db: Session, project_id: int) -> dict:
+    now = utcnow()
+    tasks = db.query(Task).join(BoardColumn, Task.column_id == BoardColumn.id).filter(Task.project_id == project_id, BoardColumn.semantic != 'trash').all()
+    done = _column_ids(db, project_id, 'done', 'realised')
+    remaining = 0
+    missing = False
+    deviations = []
+    by_owner: dict[int, int] = defaultdict(int)
+    unassigned = False
+    for task in tasks:
+        timer = get_timer(db, task.id)
+        actual = total_seconds(timer)
+        owners = db.query(TaskAssignee).filter_by(task_id=task.id).all()
+        primary = next((a.user_id for a in owners if a.is_primary), None)
+        if task.column_id not in done:
+            missing |= task.estimate_seconds is None
+            # An exhausted estimate is not evidence that unfinished work is complete.
+            missing |= task.estimate_seconds is not None and actual >= task.estimate_seconds
+            left = max(0, (task.estimate_seconds or 0) - actual)
+            remaining += left
+            if primary is None:
+                unassigned = True
+            else:
+                by_owner[primary] += left
+        overrun = max(0, actual - task.estimate_seconds) if task.estimate_seconds is not None else 0
+        ahead = max(0, task.estimate_seconds - actual) if task.column_id in done and task.estimate_seconds is not None and timer is not None and timer.state != 'running' else 0
+        overdue = max(0, int((now - task.deadline).total_seconds())) if task.column_id not in done and task.deadline else 0
+        if overrun or ahead or overdue:
+            deviations.append({'task_id':task.id, 'title':task.title, 'actual_seconds':actual,
+                'overrun_seconds':overrun, 'ahead_seconds':ahead, 'overdue_seconds':overdue,
+                'owners':[db.get(User, a.user_id).display_name for a in owners]})
+    project = db.get(Project, project_id)
+    seconds_left = int((project.deadline_msk - now).total_seconds()) if project.deadline_msk else None
+    duration = max(by_owner.values(), default=0)
+    status, margin = 'insufficient_data', None
+    if seconds_left is not None and not missing and not unassigned:
+        margin = seconds_left - duration
+        status = 'late' if margin < 0 else 'risk' if margin < max(1800, duration * .2) else 'on_track'
+    return {'forecast':{'remaining_seconds':remaining, 'calendar_estimate_seconds':duration,
+        'status':status, 'margin_seconds':margin,
+        'assumptions':'Остаток = сумма max(оценка − факт, 0) незавершённых задач. Прогноз — максимум остатка по основным исполнителям: разные люди работают параллельно, один человек — последовательно. Предполагается непрерывная доступность; зависимости, расписание и работа нескольких людей над одной задачей не моделируются. При исчерпанной или отсутствующей оценке либо без исполнителя данных недостаточно.'},
+        'deviations':deviations}
+
+
 def analytics(db: Session, project_id: int) -> dict:
     incidents = (
         db.query(Incident)
@@ -226,12 +273,13 @@ def analytics(db: Session, project_id: int) -> dict:
     )
     return {
         "kpi": kpi(db, project_id),
+        **planning(db, project_id),
         "participants": [p.model_dump() for p in participants(db, project_id)],
         "modules": module_progress(db, project_id),
         "burn_down": burn_down(db, project_id),
         "time_by_user": time_by_user(db, project_id),
         "active_incidents": [
-            {"id": i.id, "title": i.title, "level": i.level, "status": i.status}
+            {"id": i.id, "number":i.number, "title": i.title, "level": i.level, "status": i.status}
             for i in incidents
         ],
         "risks": risks(db, project_id),

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api, Analytics as AnalyticsData, Recommendation, Me, currentProject } from './api'
 import { MockAi, AiRequestView } from './MockAi'
-import { Badge, BarList, LineChart, badgeForStatus, fmt, fmtDuration, fmtDate, useLoad } from './ui'
+import { Badge, BarList, LineChart, badgeForStatus, fmt, fmtDuration, fmtDate, useLoad, incidentKind, incidentLabel } from './ui'
 
 export function Analytics({ me }: { me: Me }) {
   const [data, error, reload] = useLoad<AnalyticsData>(api.analytics)
@@ -10,13 +10,12 @@ export function Analytics({ me }: { me: Me }) {
   const isCaptain = me.roles.some((r) => r.role === 'admin' || (r.role === 'captain' && r.project_id === currentProject()))
 
   useEffect(() => {
-    const id = setInterval(reload, 5000)
+    const id = setInterval(reload, 1000)
     return () => clearInterval(id)
   }, [reload])
 
   if (!data) return <div>{error || 'Загрузка…'}</div>
 
-  const k = data.kpi
   return (
     <div>
       <div className="row" style={{ justifyContent: 'space-between', margin: '4px 0 12px' }}>
@@ -24,28 +23,20 @@ export function Analytics({ me }: { me: Me }) {
         <button className="small" onClick={reload}>Обновить</button>
       </div>
 
-      <div className="row" style={{ flexWrap: 'wrap', marginBottom: 16 }}>
-        <Kpi label="Прогресс" value={`${k.progress_percent}%`} />
-        <Kpi label="Задач" value={k.total_tasks} />
-        <Kpi label="Завершено" value={k.completed_tasks} />
-        <Kpi label="В работе" value={k.in_progress_tasks} />
-        <Kpi label="Просрочено" value={k.overdue_tasks} warn={k.overdue_tasks > 0} />
-        <Kpi label="До дедлайна" value={k.deadline_seconds_left != null ? fmtDuration(k.deadline_seconds_left) : '—'} warn={k.deadline_seconds_left != null && k.deadline_seconds_left < 6 * 3600} />
-        <Kpi label="План / Факт" value={`${fmt(k.estimate_seconds)} / ${fmt(k.actual_seconds)}`} />
-        <Kpi label="Календарное" value={fmt(k.calendar_seconds)} />
-      </div>
-
-      <div className="grid" style={{ gridTemplateColumns: '2fr 1fr', gap: 16 }}>
+      <AnalyticsMetrics data={data} />
+      <div className="grid analytics-grid" style={{ gridTemplateColumns: '2fr 1fr', gap: 16 }}>
         <div className="card">
-          <div className="section-title">Burn-down (осталось задач по дням)</div>
+          <div className="section-title">Оставшаяся работа: количество задач во времени</div>
           <LineChart points={data.burn_down} />
+          {data.burn_down[0]?.observation_only && <p className="muted">Пока доступен только текущий срез.</p>}
           <div className="row muted" style={{ fontSize: 11, marginTop: 4 }}>
             <span style={{ color: 'var(--accent)' }}>— осталось</span>
             <span style={{ color: 'var(--ok)' }}>— завершено</span>
+            {data.burn_down.some(p=>p.ideal != null) && <span style={{color:'var(--warn)'}}>┄ ориентир начального объёма к дедлайну</span>}
           </div>
         </div>
         <div className="card">
-          <div className="section-title">Время по участникам</div>
+          <div className="section-title">Время по исполнителям</div>
           <BarList
             items={data.time_by_user.map((u) => ({
               label: u.display_name,
@@ -57,7 +48,7 @@ export function Analytics({ me }: { me: Me }) {
         </div>
       </div>
 
-      <div className="grid" style={{ gridTemplateColumns: '1fr 1fr', gap: 16, marginTop: 16 }}>
+      <div className="grid analytics-grid" style={{ gridTemplateColumns: '1fr 1fr', gap: 16, marginTop: 16 }}>
         <div className="card">
           <div className="section-title">Модули</div>
           <BarList
@@ -75,13 +66,13 @@ export function Analytics({ me }: { me: Me }) {
           <div className="grid" style={{ gap: 6 }}>
             {data.active_incidents.map((i) => (
               <div key={i.id} className="row">
-                <Badge kind={badgeForStatus(i.status === 'confirmed' ? 'red' : i.level)}>{i.level}</Badge>
-                <span>{i.title}</span>
+                <Badge kind={incidentKind(i)}>{incidentLabel(i)}</Badge>
+                <span>#{i.number} {i.title}</span>
               </div>
             ))}
             {data.risks.filter((r) => r.type === 'overdue').map((r, i) => (
               <div key={i} className="row">
-                <Badge kind="red">overdue</Badge>
+                <Badge kind="red">Просрочена</Badge>
                 <span>{r.title}</span>
               </div>
             ))}
@@ -92,6 +83,16 @@ export function Analytics({ me }: { me: Me }) {
         </div>
       </div>
 
+      <div className="card" style={{marginTop:16}}>
+        <div className="section-title">Отклонения задач</div>
+        {!data.deviations.length && <p className="muted">Просрочек и отклонений от заданных оценок нет.</p>}
+        {data.deviations.map(t=><div key={t.task_id} className="section">
+          <b>{t.title}</b> · {t.owners.join(', ') || 'Исполнитель не назначен'}
+          {t.overdue_seconds>0 && <div>Просрочена на {fmt(t.overdue_seconds)}</div>}
+          {t.overrun_seconds>0 && <div>Превышение оценки: {fmt(t.overrun_seconds)}</div>}
+          {t.ahead_seconds>0 && <div>Завершена быстрее оценки на {fmt(t.ahead_seconds)}</div>}
+        </div>)}
+      </div>
       <div className="card" style={{ marginTop: 16 }}>
         <div className="section-title">Участники</div>
         <table>
@@ -101,7 +102,7 @@ export function Analytics({ me }: { me: Me }) {
               <th>Светофор</th>
               <th>Активные задачи</th>
               <th>Таймер</th>
-              <th>Время всего</th>
+              <th>Время закреплённых задач</th>
             </tr>
           </thead>
           <tbody>
@@ -110,7 +111,7 @@ export function Analytics({ me }: { me: Me }) {
               return (
                 <tr key={p.id}>
                   <td>{p.display_name} <span className="muted">({p.login})</span></td>
-                  <td><Badge kind={badgeForStatus(p.traffic_status)}>{p.traffic_status}</Badge></td>
+                  <td><Badge kind={badgeForStatus(p.traffic_status)}>{{green:'Нет блокеров',yellow:'Жёлтый блокер',red:'Красный блокер',purple:'Ожидает подтверждения'}[p.traffic_status] ?? 'Нет данных'}</Badge></td>
                   <td>{p.active_tasks}</td>
                   <td className="mono">{fmt(p.active_timer_seconds)}</td>
                   <td className="mono">{fmt(time)}</td>
@@ -153,6 +154,62 @@ export function Analytics({ me }: { me: Me }) {
       </div>
     </div>
   )
+}
+
+export function spendingSummary(k: Pick<AnalyticsData['kpi'],'total_tasks'|'progress_percent'|'estimate_seconds'|'actual_seconds'>): {timePercent:number|null;gap:number|null} {
+  if (!k.total_tasks || k.estimate_seconds<=0) return {timePercent:null,gap:null}
+  const timePercent=Math.round(k.actual_seconds/k.estimate_seconds*1000)/10
+  return {timePercent,gap:Math.round((k.progress_percent-timePercent)*10)/10}
+}
+
+export function AnalyticsMetrics({data}:{data:AnalyticsData}) {
+  const k=data.kpi
+  const {timePercent,gap}=spendingSummary(k)
+  return <>
+    <div className="analytics-metrics">
+      <section className="card metric-group" aria-label="Задачи">
+        <h3>Задачи</h3>
+        <div className="metric-values">
+          <Kpi label="Всего" value={k.total_tasks}/><Kpi label="Завершено" value={k.completed_tasks}/>
+          <Kpi label="В работе" value={k.in_progress_tasks}/><Kpi label="Просрочено" value={k.overdue_tasks} warn={k.overdue_tasks>0}/>
+        </div>
+        <ProgressLine label="Прогресс задач" value={k.progress_percent} color="var(--ok)"/>
+      </section>
+      <section className="card metric-group" aria-label="Таймеры">
+        <h3>Таймеры</h3>
+        <div className="metric-values">
+          <Kpi label="Плановая оценка" value={fmt(k.estimate_seconds)}/>
+          <Kpi label="Потрачено на задачи" value={fmt(k.actual_seconds)}/>
+          <Kpi label="Время в работе" value={fmt(k.calendar_seconds)}/>
+          <Kpi label="Активных таймеров" value={k.active_timers}/>
+          <Kpi label="Осталось работы" value={fmt(data.forecast.remaining_seconds)}/>
+          <Kpi label="До дедлайна" value={k.deadline_seconds_left==null?'—':fmtDuration(k.deadline_seconds_left)} warn={k.deadline_seconds_left!=null && k.deadline_seconds_left<21600}/>
+        </div>
+      </section>
+      <section className="card metric-group" aria-label="Сведения">
+        <h3>Сведения</h3>
+        <ProgressLine label="Прогресс задач" value={k.progress_percent} color="var(--ok)"/>
+        <ProgressLine label="Израсходовано оценки" value={timePercent} color="var(--accent)"/>
+        <div className={`budget-balance ${gap==null?'':gap>=0?'positive':'negative'}`}>
+          <b>{gap==null?'Нет оценки для сравнения':`${gap>=0?'+':''}${gap} п.п.`}</b>
+          <span>{gap==null?'Задайте плановые оценки задач':gap>0?'Задачи опережают расход времени':gap<0?'Расход времени опережает задачи':'Задачи и расход времени идут вровень'}</span>
+        </div>
+      </section>
+    </div>
+    <div className="card forecast-strip">
+      <b>Прогноз: {{on_track:'укладываемся',risk:'риск опоздания',late:'не укладываемся',insufficient_data:'недостаточно данных'}[data.forecast.status]}</b>
+      {data.forecast.margin_seconds!=null && <span>{data.forecast.margin_seconds>=0?'Запас':'Опоздание'}: {fmt(Math.abs(data.forecast.margin_seconds))}</span>}
+    </div>
+  </>
+}
+
+function ProgressLine({label,value,color}:{label:string;value:number|null;color:string}) {
+  return <div className="metric-progress">
+    <div className="row"><span>{label}</span><b>{value==null?'—':`${value}%`}</b></div>
+    <div className="bar-track" role="progressbar" aria-label={label} aria-valuemin={0} aria-valuemax={100} aria-valuenow={value==null?undefined:Math.min(100,value)}>
+      <div className="bar-fill" style={{width:`${Math.min(100,Math.max(0,value??0))}%`,background:color}}/>
+    </div>
+  </div>
 }
 
 function Kpi({ label, value, warn }: { label: string; value: string | number; warn?: boolean }) {

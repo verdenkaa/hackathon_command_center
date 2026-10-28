@@ -97,6 +97,7 @@ class Project(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(255))
+    incident_counter: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     deadline_msk: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     state: Mapped[ProjectState] = mapped_column(default=ProjectState.preparation, nullable=False)
     settings: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
@@ -193,6 +194,7 @@ class BoardColumn(Base):
     key: Mapped[str] = mapped_column(String(64), nullable=False)
     title: Mapped[str] = mapped_column(String(128), nullable=False)
     position: Mapped[int] = mapped_column(Integer, nullable=False)
+    semantic: Mapped[str] = mapped_column(String(16), default='normal', nullable=False)
     # Правила: автоматический старт/остановка таймера при попадании задачи в колонку.
     auto_start_timer: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     auto_stop_timer: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
@@ -283,8 +285,10 @@ class TimerSegment(Base):
 
 class Incident(Base):
     __tablename__ = "incidents"
+    __table_args__ = (UniqueConstraint('project_id', 'number', name='uq_incident_project_number'),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    number: Mapped[int] = mapped_column(Integer, nullable=False)
     project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), nullable=False, index=True)
     level: Mapped[str] = mapped_column(String(16), nullable=False)
     status: Mapped[str] = mapped_column(String(16), default="open", nullable=False)

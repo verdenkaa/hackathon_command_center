@@ -101,7 +101,7 @@ def test_traffic_status(client):
     assert parts[pid]["traffic_status"] == "yellow"
 
 
-def test_unconfirmed_red_does_not_color(client):
+def test_unconfirmed_red_is_purple(client):
     login(client)
     pid = _make_user(client, "part", "part-pass", "participant")
     login(client)
@@ -110,7 +110,7 @@ def test_unconfirmed_red_does_not_color(client):
         json={"level": "red", "title": "Проблема", "targets": [{"target_type": "user", "target_id": pid}]},
     )
     parts = {p["id"]: p for p in client.get("/api/v1/projects/1/participants").json()}
-    assert parts[pid]["traffic_status"] == "green"
+    assert parts[pid]["traffic_status"] == "purple"
 
 
 def test_comment_adds_event(client):

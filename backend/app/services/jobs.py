@@ -42,7 +42,7 @@ def check_overdue(db: Session, project_id: int | None = None) -> int:
         done_ids = {
             c.id
             for c in db.query(BoardColumn)
-            .filter(BoardColumn.project_id == project.id, BoardColumn.key.in_(["done", "realised", "trashed"]))
+            .filter(BoardColumn.project_id == project.id, BoardColumn.semantic.in_(['done', 'trash']))
             .all()
         }
         overdue = (

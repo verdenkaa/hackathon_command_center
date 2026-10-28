@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.db.models import ProjectState, Role
 
@@ -138,6 +138,7 @@ class ColumnOut(BaseModel):
     key: str
     title: str
     position: int
+    semantic: str = 'normal'
     auto_start_timer: bool = False
     auto_stop_timer: bool = False
 
@@ -149,6 +150,8 @@ class ColumnCreate(BaseModel):
 
 
 class ColumnPatch(BaseModel):
+    position: int | None = Field(default=None, ge=0)
+    semantic: Literal['normal', 'active', 'done', 'trash'] | None = None
     title: str | None = Field(default=None, min_length=1, max_length=128)
     auto_start_timer: bool | None = None
     auto_stop_timer: bool | None = None
@@ -210,27 +213,43 @@ class TaskCreate(BaseModel):
     title: str = Field(min_length=1, max_length=255)
     description: str | None = None
     module_id: int | None = None
-    priority: str = "medium"
+    priority: Literal['low', 'medium', 'high', 'critical'] = "medium"
     estimate_seconds: int | None = Field(default=None, ge=0)
     deadline: datetime | None = None
     tags: list[str] = Field(default_factory=list)
     column_key: str = "backlog"
     parent_id: int | None = None
 
+    @field_validator('title')
+    @classmethod
+    def nonblank_title(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError('Укажите название задачи')
+        return value.strip()
+
 
 class TaskPatch(BaseModel):
-    title: str | None = None
+    parent_id: int | None = None
+    title: str | None = Field(default=None, min_length=1, max_length=255)
     description: str | None = None
     module_id: int | None = None
-    priority: str | None = None
+    priority: Literal['low', 'medium', 'high', 'critical'] | None = None
     estimate_seconds: int | None = Field(default=None, ge=0)
     deadline: datetime | None = None
     tags: list[str] | None = None
     version: int
 
+    @field_validator('title', 'priority')
+    @classmethod
+    def required_when_set(cls, value: str | None) -> str:
+        if value is None or not value.strip():
+            raise ValueError('Название и приоритет не могут быть пустыми')
+        return value.strip()
+
 
 class TaskMove(BaseModel):
     column_key: str
+    column_title: str = ''
     version: int
 
 
@@ -239,6 +258,8 @@ class TaskOut(BaseModel):
     project_id: int
     column_id: int
     column_key: str
+    column_semantic: str = 'normal'
+    blocking_incidents: list[dict] = Field(default_factory=list)
     module_id: int | None
     parent_id: int | None
     title: str
@@ -293,6 +314,8 @@ class ProjectCreate(BaseModel):
 
 
 class AnalyticsOut(BaseModel):
+    forecast: dict = Field(default_factory=dict)
+    deviations: list[dict] = Field(default_factory=list)
     kpi: dict
     participants: list[ParticipantOut] = Field(default_factory=list)
     modules: list[dict] = Field(default_factory=list)
@@ -356,6 +379,7 @@ class IncidentEventOut(BaseModel):
 
 class IncidentOut(BaseModel):
     id: int
+    number: int
     project_id: int
     level: str
     status: str

@@ -27,6 +27,7 @@ export interface Column {
   key: string
   title: string
   position: number
+  semantic: string
   auto_start_timer: boolean
   auto_stop_timer: boolean
 }
@@ -50,6 +51,9 @@ export interface Task {
   project_id: number
   column_id: number
   column_key: string
+  column_title: string
+  column_semantic: string
+  blocking_incidents: IncidentSummary[]
   module_id: number | null
   parent_id: number | null
   title: string
@@ -67,8 +71,11 @@ export interface Task {
   timer: Timer | null
 }
 
+export interface IncidentSummary { id:number; number:number; title:string; level:string; status:string }
+
 export interface Incident {
   id: number
+  number: number
   project_id: number
   level: string
   status: string
@@ -189,6 +196,8 @@ export interface Module {
 }
 
 export interface Analytics {
+  forecast: {remaining_seconds:number;calendar_estimate_seconds:number;status:string;margin_seconds:number|null;assumptions:string}
+  deviations: {task_id:number;title:string;actual_seconds:number;overrun_seconds:number;ahead_seconds:number;overdue_seconds:number;owners:string[]}[]
   kpi: {
     project_id: number
     name: string
@@ -208,9 +217,9 @@ export interface Analytics {
   }
   participants: Participant[]
   modules: { id: number; name: string; total: number; done: number; progress: number; traffic_status: string }[]
-  burn_down: { date: string; created: number; completed: number; remaining: number }[]
+  burn_down: { date: string; created: number; completed: number; remaining: number; ideal?:number; observation_only?:boolean }[]
   time_by_user: { user_id: number | null; login: string; display_name: string; seconds: number }[]
-  active_incidents: { id: number; title: string; level: string; status: string }[]
+  active_incidents: { id: number; number:number; title: string; level: string; status: string }[]
   risks: { type: string; task_id?: number; incident_id?: number; title: string; level?: string; status?: string; deadline?: string | null }[]
 }
 
@@ -293,7 +302,7 @@ export const api = {
     }),
   patchColumn: (id: number, payload: Record<string, unknown>) =>
     request(`/api/v1/columns/${id}`, { method: 'PATCH', body: JSON.stringify(payload) }),
-  deleteColumn: (id: number) => request(`/api/v1/columns/${id}`, { method: 'DELETE' }),
+  deleteColumn: (id: number, target?: number) => request(`/api/v1/columns/${id}${target ? `?target_column_id=${target}` : ''}`, { method: 'DELETE' }),
   modules: (): Promise<Module[]> => request(`/api/v1/projects/${pid()}/modules`),
   createModule: (name: string, description?: string) =>
     request(`/api/v1/projects/${pid()}/modules`, { method: 'POST', body: JSON.stringify({ name, description: description ?? null }) }),
@@ -304,6 +313,8 @@ export const api = {
   analytics: (): Promise<Analytics> => request(`/api/v1/projects/${pid()}/analytics`),
   dashboard: (): Promise<DashboardKpi> => request(`/api/v1/projects/${pid()}/dashboard`),
 
+  task: (id:number): Promise<Task> => request(`/api/v1/tasks/${id}`),
+  incidentImpact: (id:number, depth:number): Promise<{task_ids:number[];user_ids:number[]}> => request(`/api/v1/tasks/${id}/incident-impact?depth=${depth}`),
   tasks: (): Promise<Task[]> => request(`/api/v1/projects/${pid()}/tasks`),
   createTask: (payload: Record<string, unknown>): Promise<Task> =>
     request(`/api/v1/projects/${pid()}/tasks`, { method: 'POST', body: JSON.stringify(payload) }),
@@ -311,7 +322,7 @@ export const api = {
     request(`/api/v1/tasks/${taskId}`, { method: 'PATCH', body: JSON.stringify({ ...payload, version }) }),
   moveTask: (taskId: number, columnKey: string, version: number) =>
     request(`/api/v1/tasks/${taskId}/move`, { method: 'POST', body: JSON.stringify({ column_key: columnKey, version }) }),
-  taskHistory: (taskId: number): Promise<{ action: string; actor_id: number | null; data: Record<string, unknown>; created_at: string }[]> =>
+  taskHistory: (taskId: number): Promise<{ text:string; action: string; actor_id: number | null; data: Record<string, unknown>; created_at: string }[]> =>
     request(`/api/v1/tasks/${taskId}/history`),
   setAssignees: (taskId: number, assignees: { user_id: number; is_primary: boolean }[]) =>
     request(`/api/v1/tasks/${taskId}/assignees`, { method: 'PUT', body: JSON.stringify({ assignees }) }),
@@ -332,6 +343,7 @@ export const api = {
   timeAdjust: (taskId: number, accumulatedSeconds: number) =>
     request(`/api/v1/tasks/${taskId}/time-adjustment`, { method: 'POST', body: JSON.stringify({ accumulated_seconds: accumulatedSeconds }) }),
 
+  incident: (id:number): Promise<Incident> => request(`/api/v1/incidents/${id}`),
   incidents: (): Promise<Incident[]> => request(`/api/v1/projects/${pid()}/incidents`),
   createIncident: (payload: Record<string, unknown>) =>
     request(`/api/v1/projects/${pid()}/incidents`, { method: 'POST', body: JSON.stringify(payload) }),
@@ -351,6 +363,7 @@ export const api = {
   excludeRecommendation: (id: number) => request(`/api/v1/projects/${pid()}/ai/recommendations/${id}/exclude`, {method:'POST'}),
 
   notifications: (): Promise<Notification[]> => request('/api/v1/notifications'),
+  openNotification: (id:number): Promise<{target:{type:'task'|'incident';id:number;project_id:number}|null;message:string}> => request(`/api/v1/notifications/${id}/open`, {method:'POST'}),
   readNotification: (id: number) => request(`/api/v1/notifications/${id}/read`, { method: 'POST' }),
   readAllNotifications: () => request('/api/v1/notifications/read-all', { method: 'POST' }),
   deleteNotification: (id: number) => request(`/api/v1/notifications/${id}`, { method: 'DELETE' }),

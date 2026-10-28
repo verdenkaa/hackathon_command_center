@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from 'react'
-import { api, ApiError, Me, Notification, Project, currentProject, setCurrentProject } from './api'
+import { useCallback, useEffect, useState, useRef } from 'react'
+import { api, ApiError, Me, Notification, Incident, Project, currentProject, setCurrentProject } from './api'
 import { fmtDate } from './ui'
 import Board from './Board'
 import { Incidents } from './Incidents'
@@ -26,6 +26,17 @@ export default function App() {
   const [projectsLoaded, setProjectsLoaded] = useState(false)
   const [notifications, setNotifications] = useState<Notification[]>([])
   const [notifOpen, setNotifOpen] = useState(false)
+  const notifRef = useRef<HTMLDivElement>(null)
+  const [navigation, setNavigation] = useState<{type:'task'|'incident';id:number;incident?:Incident}|null>(null)
+  const [navigationKey, setNavigationKey] = useState(0)
+  const [message, setMessage] = useState('')
+  useEffect(()=>{
+    const close=(e:PointerEvent)=>{if(!notifRef.current?.contains(e.target as Node))setNotifOpen(false)}
+    const escape=(e:KeyboardEvent)=>{if(e.key==='Escape')setNotifOpen(false)}
+    document.addEventListener('pointerdown',close)
+    document.addEventListener('keydown',escape)
+    return ()=>{document.removeEventListener('pointerdown',close);document.removeEventListener('keydown',escape)}
+  },[])
 
   useEffect(() => {
     api.me().then(setMe).catch(() => setMe(null)).finally(() => setLoading(false))
@@ -75,6 +86,8 @@ export default function App() {
   )
 
   function switchProject(id: number) {
+    setNavigation(null)
+    setMessage('')
     setCurrentProject(id)
     setProjectId(id)
     setTab('board')
@@ -96,7 +109,7 @@ export default function App() {
             </button>
           ))}
         </nav>
-        <div className="dropdown">
+        <div className="dropdown" ref={notifRef}>
           <button onClick={() => setNotifOpen(!notifOpen)}>
             🔔 {unread > 0 && <BadgeCount n={unread} />}
           </button>
@@ -130,41 +143,27 @@ export default function App() {
               <div style={{ maxHeight: 300, overflowY: 'auto' }}>
                 {notifications.length === 0 && <div className="dropdown-item muted">Уведомлений нет</div>}
                 {notifications.map((n) => (
-                  <div key={n.id} className={`dropdown-item ${n.read_at ? '' : 'unread'}`}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 6 }}>
-                      <div style={{ fontSize: 13 }}>
-                        <TypeLabel type={n.type} /> {String(n.payload.title ?? '')}
-                      </div>
-                      <button
-                        className="small ghost"
-                        title="Удалить"
-                        onClick={async () => {
-                          await api.deleteNotification(n.id)
-                          setNotifications((prev) => prev.filter((x) => x.id !== n.id))
-                        }}
-                      >
-                        ✕
-                      </button>
-                    </div>
-                    {typeof n.payload.resolution === 'string' && n.payload.resolution && (
-                      <div className="muted" style={{ fontSize: 12 }}>Решение: {n.payload.resolution}</div>
-                    )}
-                    <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>{fmtDate(n.created_at)}</div>
-                    {!n.read_at && (
-                      <button
-                        className="small"
-                        style={{ marginTop: 4 }}
-                        onClick={async () => {
-                          await api.readNotification(n.id)
-                          setNotifications((prev) =>
-                            prev.map((x) => (x.id === n.id ? { ...x, read_at: 'now' } : x)),
-                          )
-                        }}
-                      >
-                        Прочитано
-                      </button>
-                    )}
-                  </div>
+                  <NotificationItem key={n.id} notification={n} onOpen={async()=>{
+                    try {
+                      const result=await api.openNotification(n.id)
+                      setNotifications(prev=>prev.map(x=>x.id===n.id ? {...x,read_at:'now'}:x))
+                      if(!result.target){setMessage(result.message);setNotifOpen(false);return}
+                      const target=result.target
+                      const incident=target.type==='incident' ? await api.incident(target.id) : undefined
+                      switchProject(target.project_id)
+                      setNavigation({...target,incident})
+                      setNavigationKey(v=>v+1)
+                      setTab(target.type==='task'?'board':'incidents')
+                      setNotifOpen(false)
+                    }catch(e){setMessage((e as Error).message);setNotifOpen(false)}
+                  }} onRead={async()=>{
+                    try{await api.readNotification(n.id);setNotifications(prev=>prev.map(x=>x.id===n.id?{...x,read_at:'now'}:x))}
+                    catch(e){setMessage((e as Error).message)}
+                  }} onDelete={async()=>{
+                    try{await api.deleteNotification(n.id);setNotifications(prev=>prev.filter(x=>x.id!==n.id))}
+                    catch(e){setMessage((e as Error).message)}
+                  }}/>
+
                 ))}
               </div>
             </div>
@@ -181,8 +180,10 @@ export default function App() {
       </div>
 
       <div style={{ marginTop: 12 }}>
-        {tab === 'board' && <Board key={projectId} me={me} />}
-        {tab === 'incidents' && <Incidents key={projectId} me={me} />}
+        {message && <div role="status" className="card">{message}</div>}
+        {tab === 'board' && <Board key={`${projectId}-${navigationKey}`} me={me} openTaskId={navigation?.type==='task'?navigation.id:null}
+          onOpenIncident={id=>{setNavigation({type:'incident',id});setNavigationKey(v=>v+1);setTab('incidents')}}/>}
+        {tab === 'incidents' && <Incidents key={`${projectId}-${navigationKey}`} me={me} initialIncident={navigation?.incident} openIncidentId={navigation?.type==='incident'?navigation.id:null} />}
         {tab === 'analytics' && <Analytics key={projectId} me={me} />}
         {tab === 'admin' && isAdmin && <Admin key={projectId} />}
         {tab === 'settings' && <Settings key={projectId} me={me} onProjectsChanged={reloadProjects}
@@ -190,6 +191,21 @@ export default function App() {
       </div>
     </div>
   )
+}
+
+export function NotificationItem({notification:n,onOpen,onRead,onDelete}:{notification:Notification;onOpen:()=>void;onRead:()=>void;onDelete:()=>void}) {
+  const kind=n.type.startsWith('incident_')?'блокер':n.type.startsWith('task_')?'задачу':'уведомление'
+  return <div className={`dropdown-item ${n.read_at?'':'unread'}`}>
+    <button className="notification-open" aria-label={`Открыть ${kind}: ${String(n.payload.title??'')}`} onClick={onOpen}>
+      <span><TypeLabel type={n.type}/> {String(n.payload.title??'')}</span>
+      {typeof n.payload.resolution==='string' && <span className="muted">Решение: {n.payload.resolution}</span>}
+      <span className="muted">{fmtDate(n.created_at)} · Открыть →</span>
+    </button>
+    <div className="row notification-actions">
+      {!n.read_at && <button className="small" onClick={onRead}>Прочитано</button>}
+      <button className="small ghost" aria-label="Удалить уведомление" onClick={onDelete}>✕</button>
+    </div>
+  </div>
 }
 
 function BadgeCount({ n }: { n: number }) {
@@ -219,7 +235,7 @@ function TypeLabel({ type }: { type: string }) {
     task_assigned: '📌 Назначена задача',
     task_overdue: '⏰ Просрочена задача',
   }
-  return <b>{map[type] ?? type}</b>
+  return <b>{map[type] ?? 'Уведомление'}</b>
 }
 
 function Login({ onLogin }: { onLogin: (me: Me) => void }) {

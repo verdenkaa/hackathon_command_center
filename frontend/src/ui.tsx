@@ -1,15 +1,22 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 export function useLoad<T>(fn: () => Promise<T>, deps: unknown[] = []): [T | null, string, () => void] {
   const [data, setData] = useState<T | null>(null)
   const [error, setError] = useState('')
-  const reload = () => {
-    fn()
-      .then(setData)
-      .catch((e) => setError((e as Error).message))
-  }
+  const latest = useRef(fn)
+  latest.current = fn
+  const sequence = useRef(0)
+  const alive = useRef(true)
+  const reload = useCallback(() => {
+    const request = ++sequence.current
+    latest.current()
+      .then(value=>{if(alive.current && request===sequence.current){setData(value);setError('')}})
+      .catch((e) => {if(alive.current && request===sequence.current)setError((e as Error).message)})
+  },[])
   useEffect(() => {
+    alive.current = true
     reload()
+    return ()=>{alive.current=false;sequence.current++}
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, deps)
   return [data, error, reload]
@@ -55,7 +62,22 @@ export function parseUTC(iso: string): Date {
 
 export function fmtDate(iso: string | null): string {
   if (!iso) return '—'
-  return parseUTC(iso).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+  return parseUTC(iso).toLocaleString('ru-RU', { timeZone:'Europe/Moscow', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+}
+
+export const PRIORITIES: Record<string,string> = {low:'Низкий', medium:'Средний', high:'Высокий', critical:'Критический'}
+export function toMoscowInput(iso: string | null): string {
+  if (!iso) return ''
+  return new Date(parseUTC(iso).getTime() + 3*3600000).toISOString().slice(0,16)
+}
+export function fromMoscowInput(value: string): string | null {
+  return value ? new Date(value + ':00+03:00').toISOString() : null
+}
+export function incidentKind(i: {level:string;status:string}): string {
+  return i.status === 'resolved' ? 'gray' : i.level === 'red' && i.status === 'open' ? 'purple' : i.level
+}
+export function incidentLabel(i: {level:string;status:string}): string {
+  return i.status === 'resolved' ? 'Закрыт' : i.level === 'red' && i.status === 'open' ? 'Ожидает подтверждения' : i.status === 'confirmed' ? 'Подтверждён' : 'Открыт'
 }
 
 export function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
@@ -100,37 +122,45 @@ export function badgeForStatus(status: string): string {
       return 'red'
     case 'running':
       return 'blue'
+    case 'purple':
+      return 'purple'
     default:
       return 'gray'
   }
 }
 
 /** Линейный график (burn-down) на SVG. */
-export function LineChart({ points }: { points: { date: string; remaining: number; completed: number }[] }) {
+export function LineChart({ points }: { points: { date: string; remaining: number; completed: number; ideal?:number }[] }) {
   const w = 640
   const h = 200
-  const pad = 28
-  if (points.length === 0) return <div className="muted">Нет данных для графика</div>
-  const maxY = Math.max(1, ...points.map((p) => p.remaining))
-  const x = (i: number) => pad + (i * (w - 2 * pad)) / Math.max(1, points.length - 1)
+  const pad = 42
+  if (points.length === 0) return <div className="muted">Нет истории создания и перемещения задач. График появится после первого изменения.</div>
+  const maxY = Math.max(1, ...points.flatMap((p) => [p.remaining, p.completed, p.ideal ?? 0]))
+  const times = points.map(p => parseUTC(p.date).getTime())
+  const x = (i: number) => pad + ((times[i]-times[0]) * (w - 2 * pad)) / Math.max(1, times[times.length-1]-times[0])
   const y = (v: number) => h - pad - (v * (h - 2 * pad)) / maxY
-  const line = (key: 'remaining' | 'completed') =>
-    points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${x(i)} ${y(p[key])}`).join(' ')
+  const line = (key: 'remaining' | 'completed' | 'ideal') =>
+    points.map((p, i) => i===0 ? `M ${x(i)} ${y(p[key] ?? 0)}` : key==='ideal' ? `L ${x(i)} ${y(p[key] ?? 0)}` : `H ${x(i)} V ${y(p[key] ?? 0)}`).join(' ')
   const grid = [0, 0.25, 0.5, 0.75, 1].map((f) => (
     <line key={f} x1={pad} x2={w - pad} y1={y(maxY * f)} y2={y(maxY * f)} stroke="var(--border)" strokeWidth="1" />
   ))
   return (
     <svg viewBox={`0 0 ${w} ${h}`} style={{ width: '100%', maxWidth: 760 }}>
       {grid}
+      <text x={4} y={14} fill="var(--muted)" fontSize="10">Задачи, шт.</text>
+      <text x={w/2} y={h-1} fill="var(--muted)" fontSize="10">Время (МСК)</text>
+      <text x={4} y={y(maxY)} fill="var(--muted)" fontSize="10">{maxY}</text>
+      <text x={20} y={y(0)} fill="var(--muted)" fontSize="10">0</text>
       <path d={line('remaining')} fill="none" stroke="var(--accent)" strokeWidth="2" />
       <path d={line('completed')} fill="none" stroke="var(--ok)" strokeWidth="2" />
+      {points.some(p => p.ideal != null) && <path d={line('ideal')} fill="none" stroke="var(--warn)" strokeWidth="2" strokeDasharray="5 4" />}
       {points.map((p, i) => (
         <circle key={i} cx={x(i)} cy={y(p.remaining)} r={2.5} fill="var(--accent)" />
       ))}
       {points.map((p, i) =>
-        i % Math.max(1, Math.floor(points.length / 8)) === 0 || i === points.length - 1 ? (
-          <text key={i} x={x(i)} y={h - 8} fill="var(--muted)" fontSize="9" textAnchor="middle">
-            {p.date.slice(5)}
+        i % Math.max(1, Math.ceil((points.length - 1) / 4)) === 0 || i === points.length - 1 ? (
+          <text key={i} x={x(i)} y={h - 20} fill="var(--muted)" fontSize="9" textAnchor="middle">
+            {fmtDate(p.date)}
           </text>
         ) : null,
       )}

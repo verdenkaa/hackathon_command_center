@@ -55,3 +55,13 @@ def test_mark_read(client):
 
 def test_notification_requires_auth(client):
     assert client.get("/api/v1/notifications").status_code == 401
+
+
+def test_blocker_notification_opens_internal_id_in_other_project(client):
+    login(client)
+    project=client.post('/api/v1/projects',json={'name':'Blockers'}).json()
+    incident=client.post(f"/api/v1/projects/{project['id']}/incidents",json={'level':'yellow','title':'Open this blocker'}).json()
+    notification=next(n for n in client.get('/api/v1/notifications').json() if n['payload'].get('incident_id')==incident['id'])
+    target=client.post(f"/api/v1/notifications/{notification['id']}/open").json()['target']
+    assert target=={'type':'incident','id':incident['id'],'project_id':project['id']}
+    assert client.get(f"/api/v1/incidents/{target['id']}").json()['title']=='Open this blocker'

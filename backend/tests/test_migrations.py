@@ -44,7 +44,8 @@ def test_upgrade_preserves_legacy_access_and_adds_mock_storage(tmp_path, monkeyp
     engine = create_engine(url)
     with Session(engine) as db:
         db.add(User(login='legacy', display_name='Legacy', password_hash='unused'))
-        db.add_all([Project(name='A'), Project(name='B')])
+        # Insert using the old schema: the current ORM has new columns.
+        db.execute(text("INSERT INTO projects (name,state,settings,created_at) VALUES ('A','preparation','{}',CURRENT_TIMESTAMP),('B','preparation','{}',CURRENT_TIMESTAMP)"))
         db.flush()
         db.add(RoleAssignment(user_id=1, role='participant', project_id=None))
         db.commit()
@@ -54,6 +55,31 @@ def test_upgrade_preserves_legacy_access_and_adds_mock_storage(tmp_path, monkeyp
         assert active == [1, 2]
         assert connection.execute(text("SELECT count(*) FROM telegram_deliveries")).scalar_one() == 0
         assert 'request_context' in {r[1] for r in connection.execute(text('PRAGMA table_info(ai_recommendations)'))}
+    engine.dispose()
+
+
+def test_incident_numbers_backfill_retains_links(tmp_path, monkeypatch) -> None:
+    from alembic import command
+    from alembic.config import Config
+    from app.config import settings
+    backend = Path(__file__).resolve().parents[1]
+    url = f"sqlite:///{(tmp_path / 'number-upgrade.db').as_posix()}"
+    monkeypatch.setattr(settings, 'database_url', url)
+    cfg = Config(str(backend / 'alembic.ini'))
+    cfg.set_main_option('script_location', str(backend / 'alembic'))
+    command.upgrade(cfg, '20261027_sandbox_checks')
+    engine = create_engine(url)
+    with engine.begin() as db:
+        db.execute(text("INSERT INTO users (id,login,password_hash,display_name,active,created_at) VALUES (1,'u','unused','User',1,CURRENT_TIMESTAMP)"))
+        db.execute(text("INSERT INTO projects (id,name,state,settings,created_at) VALUES (1,'A','active','{}',CURRENT_TIMESTAMP),(2,'B','active','{}',CURRENT_TIMESTAMP)"))
+        db.execute(text("INSERT INTO incidents (id,project_id,level,status,title,author_id,created_at) VALUES (8,1,'red','resolved','Old',1,'2026-10-26'),(12,2,'yellow','open','Other',1,'2026-10-27'),(15,1,'yellow','open','New',1,'2026-10-27')"))
+        db.execute(text("INSERT INTO incident_targets (incident_id,target_type,target_id) VALUES (8,'user',1)"))
+    command.upgrade(cfg, 'head')
+    with engine.connect() as db:
+        assert db.execute(text('SELECT id,number FROM incidents ORDER BY id')).all() == [(8,1),(12,1),(15,2)]
+        assert db.execute(text('SELECT incident_counter FROM projects ORDER BY id')).scalars().all() == [2,1]
+        assert db.execute(text('SELECT incident_id FROM incident_targets')).scalar_one() == 8
+        assert not db.execute(text('PRAGMA foreign_key_check')).all()
     engine.dispose()
 
 

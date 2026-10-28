@@ -2,9 +2,10 @@
 from __future__ import annotations
 
 from sqlalchemy.orm import Session
+from sqlalchemy import update
 
 from app.api.errors import api_error
-from app.db.models import Incident, IncidentEvent, IncidentTarget
+from app.db.models import Incident, IncidentEvent, IncidentTarget, Project
 from app.schemas import IncidentEventOut, IncidentOut, IncidentTargetOut
 from app.timeutil import utcnow
 
@@ -22,7 +23,10 @@ def create_incident(
     owner_id: int | None,
     targets: list,
 ) -> Incident:
+    # Atomic write serializes concurrent creators, and survives record deletion.
+    number = db.execute(update(Project).where(Project.id == project_id).values(incident_counter=Project.incident_counter + 1).returning(Project.incident_counter)).scalar_one()
     incident = Incident(
+        number=number,
         project_id=project_id,
         level=level,
         status="open",
@@ -31,7 +35,7 @@ def create_incident(
         impact=impact,
         urgency=urgency,
         author_id=author_id,
-        owner_id=owner_id,
+        owner_id=owner_id if owner_id is not None else author_id,
     )
     db.add(incident)
     db.flush()
@@ -104,6 +108,8 @@ def traffic_status(db: Session, target_type: str, target_id: int, project_id: in
     )
     if any(i.level == "red" and i.status == "confirmed" for i in active):
         return "red"
+    if any(i.level == 'red' and i.status == 'open' for i in active):
+        return 'purple'
     if any(i.level == "yellow" for i in active):
         return "yellow"
     return "green"
@@ -119,6 +125,7 @@ def serialize_incident(db: Session, incident: Incident) -> IncidentOut:
     )
     return IncidentOut(
         id=incident.id,
+        number=incident.number,
         project_id=incident.project_id,
         level=incident.level,
         status=incident.status,

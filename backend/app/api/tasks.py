@@ -28,12 +28,35 @@ from app.schemas import (
     TaskPatch,
 )
 from app.services.audit import write_audit
+from app.services.history import history_text as _history_text
 from app.services.board import get_column_by_key
 from app.services.notifications import notify_users
 from app.services.tasks import serialize_task
 from app.timeutil import to_naive_utc
 
 router = APIRouter(tags=["tasks"])
+
+
+@router.get('/tasks/{task_id}/incident-impact')
+def incident_impact(task_id: int, depth: int = Query(1, ge=1, le=100), db: Session = Depends(get_db), _u=Depends(require_member)) -> dict:
+    task = _get_task(db, task_id)
+    eligible = {t.id for t in db.query(Task).join(BoardColumn, Task.column_id == BoardColumn.id)
+                .filter(Task.project_id == task.project_id, BoardColumn.semantic != 'trash').all()}
+    if task_id not in eligible:
+        raise api_error(422, 'TASK_TRASHED', 'Исходная задача находится в корзине')
+    edges: dict[int, set[int]] = {}
+    for link in db.query(TaskDependency).filter(TaskDependency.task_id.in_(eligible), TaskDependency.predecessor_id.in_(eligible)).all():
+        source, target = (link.task_id, link.predecessor_id) if link.link_type == 'before' else (link.predecessor_id, link.task_id)
+        edges.setdefault(source, set()).add(target)
+    visited, frontier = {task_id}, {task_id}
+    for _ in range(depth):
+        frontier = {child for parent in frontier for child in edges.get(parent, set())} - visited
+        visited.update(frontier)
+        if not frontier:
+            break
+    users = {a.user_id for a in db.query(TaskAssignee).filter(TaskAssignee.task_id.in_(visited)).all()}
+    from app.deps import project_member_ids
+    return {'task_ids':sorted(visited), 'user_ids':sorted(users & set(project_member_ids(db, task.project_id)))}
 
 
 def _get_task(db: Session, task_id: int) -> Task:
@@ -97,7 +120,13 @@ def create_task(
     user: User = Depends(require_member),
 ) -> TaskOut:
     ensure_project_active(db, project_id)
-    column = get_column_by_key(db, project_id, body.column_key)
+    if body.column_key == 'backlog' and not db.query(BoardColumn).filter_by(project_id=project_id, key='backlog').first():
+        column = db.query(BoardColumn).filter(BoardColumn.project_id == project_id, BoardColumn.semantic.notin_(['done', 'trash'])).order_by(BoardColumn.position).first()
+        column = column or db.query(BoardColumn).filter_by(project_id=project_id).order_by(BoardColumn.position).first()
+        if column is None:
+            raise api_error(409, 'NO_COLUMNS', 'Сначала создайте колонку проекта')
+    else:
+        column = get_column_by_key(db, project_id, body.column_key)
     _validate_module(db, project_id, body.module_id)
     if body.parent_id is not None:
         parent = db.get(Task, body.parent_id)
@@ -120,7 +149,7 @@ def create_task(
     db.add(task)
     db.flush()
     write_audit(db, action="task.created", actor_id=user.id, project_id=project_id, entity_type="task", entity_id=task.id,
-                data={"title": task.title})
+                data={"title": task.title, 'column_semantic':column.semantic})
     db.commit()
     db.refresh(task)
     return serialize_task(db, task)
@@ -147,6 +176,7 @@ def task_history(task_id: int, db: Session = Depends(get_db), _u=Depends(require
             "actor_id": r.actor_id,
             "data": r.data,
             "created_at": r.created_at.isoformat(),
+            "text": _history_text(db, r),
         }
         for r in rows
     ]
@@ -162,14 +192,26 @@ def patch_task(
     task = _get_task(db, task_id)
     _check_version(task, body.version)
     updates = body.model_dump(exclude_unset=True, exclude={"version"})
+    changes = {field: {'old': str(getattr(task, field)) if field == 'deadline' and getattr(task, field) else getattr(task, field),
+                       'new': str(value) if field == 'deadline' and value else value} for field, value in updates.items()}
     if "module_id" in updates:
         _validate_module(db, task.project_id, updates["module_id"])
+    if updates.get('parent_id') is not None:
+        parent = db.get(Task, updates['parent_id'])
+        seen = {task.id}
+        while parent is not None:
+            if parent.id in seen or parent.project_id != task.project_id or db.get(BoardColumn, parent.column_id).semantic == 'trash':
+                raise api_error(422, 'INVALID_PARENT', 'Выберите задачу этого проекта вне корзины, без цикла подзадач')
+            seen.add(parent.id)
+            parent = db.get(Task, parent.parent_id) if parent.parent_id else None
+        if db.get(Task, updates['parent_id']) is None:
+            raise api_error(422, 'INVALID_PARENT', 'Родительская задача не найдена')
     if "deadline" in updates and updates["deadline"] is not None:
         updates["deadline"] = to_naive_utc(updates["deadline"])
     for field, value in updates.items():
         setattr(task, field, value)
     task.version += 1
-    write_audit(db, action="task.updated", actor_id=user.id, project_id=task.project_id, entity_type="task", entity_id=task.id)
+    write_audit(db, action="task.updated", actor_id=user.id, project_id=task.project_id, entity_type="task", entity_id=task.id, data={'changes':changes})
     db.commit()
     db.refresh(task)
     return serialize_task(db, task)
@@ -187,10 +229,11 @@ def move_task(
     _check_version(task, body.version)
     column = get_column_by_key(db, task.project_id, body.column_key)
     old = task.column_id
+    old_column = db.get(BoardColumn, old)
     task.column_id = column.id
     task.version += 1
     write_audit(db, action="task.moved", actor_id=user.id, project_id=task.project_id, entity_type="task", entity_id=task.id,
-                data={"from_column": old, "to_column": column.id, "key": body.column_key})
+                data={"from_column": old, "to_column": column.id, "key": body.column_key, 'from_title':old_column.title, 'to_title':column.title, 'from_semantic':old_column.semantic, 'to_semantic':column.semantic})
 
     # Правила колонки: авто-старт / авто-остановка таймера.
     from app.services import timers as timers_svc
@@ -262,6 +305,8 @@ def add_dependency(
     predecessor = db.get(Task, body.predecessor_id)
     if predecessor is None or predecessor.project_id != task.project_id:
         raise api_error(422, "VALIDATION_ERROR", "Предшествующая задача не принадлежит проекту")
+    if any(db.get(BoardColumn, t.column_id).semantic == 'trash' for t in (task, predecessor)):
+        raise api_error(422, 'TASK_TRASHED', 'Задачи из корзины нельзя добавлять в связи')
     exists = db.query(TaskDependency).filter(
         TaskDependency.task_id == task_id, TaskDependency.predecessor_id == body.predecessor_id
     ).first()

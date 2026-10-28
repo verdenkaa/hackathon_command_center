@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api, Incident, Me, Module, Participant, Task } from './api'
-import { Badge, Field, Modal, badgeForStatus, fmtDate, useLoad } from './ui'
+import { Badge, Field, Modal, badgeForStatus, fmtDate, useLoad, incidentKind, incidentLabel, PRIORITIES } from './ui'
 
 function ageStr(seconds: number): string {
   if (seconds < 60) return `${seconds}с`
@@ -9,14 +9,21 @@ function ageStr(seconds: number): string {
   return `${Math.floor(seconds / 86400)}д`
 }
 
-export function Incidents({ me }: { me: Me }) {
+export function Incidents({ me, openIncidentId, initialIncident }: { me: Me; openIncidentId?:number|null; initialIncident?:Incident }) {
   const [incidents, error, reload] = useLoad<Incident[]>(api.incidents)
   const [participants] = useLoad<Participant[]>(api.participants)
   const [tasks] = useLoad<Task[]>(api.tasks)
   const [modules] = useLoad<Module[]>(api.modules)
   const [createOpen, setCreateOpen] = useState(false)
-  const [selected, setSelected] = useState<Incident | null>(null)
+  const [selected, setSelected] = useState<Incident | null>(initialIncident ?? null)
+  const [openError,setOpenError]=useState('')
   const [filter, setFilter] = useState('')
+
+  useEffect(()=>{
+    let active=true
+    if(openIncidentId && !initialIncident) api.incident(openIncidentId).then(i=>{if(active)setSelected(i)}).catch(e=>{if(active)setOpenError(`Не удалось открыть блокер: ${e.message}`)})
+    return ()=>{active=false}
+  },[openIncidentId,initialIncident])
 
   // Авто-обновление (возраст инцидентов, новые события).
   useEffect(() => {
@@ -50,16 +57,15 @@ export function Incidents({ me }: { me: Me }) {
       </div>
 
       {error && <div className="error">{error}</div>}
+      {openError && <div className="error" role="alert">{openError}</div>}
 
       <div className="grid" style={{ gap: 8 }}>
         {list.map((i) => (
           <div key={i.id} className="card" style={{ cursor: 'pointer', padding: 10 }} onClick={() => setSelected(i)}>
             <div className="row">
-              <Badge kind={badgeForStatus(i.level === 'red' && i.status === 'confirmed' ? 'red' : i.level === 'red' ? 'open' : i.level)}>
-                {i.level}
-              </Badge>
-              <Badge kind={badgeForStatus(i.status)}>{i.status}</Badge>
-              <b>{i.title}</b>
+              <Badge kind={incidentKind(i)}>{i.level === 'red' ? 'Красный' : 'Жёлтый'}</Badge>
+              <Badge kind={incidentKind(i)}>{incidentLabel(i)}</Badge>
+              <b>#{i.number} {i.title}</b>
               <span className="grow" />
               <span className="muted" style={{ fontSize: 12 }}>
                 {ageStr(i.age_seconds)} · ответственный {name(i.owner_id)} · автор {name(i.author_id)}
@@ -89,7 +95,7 @@ export function Incidents({ me }: { me: Me }) {
           <div className="side-backdrop" onClick={() => setSelected(null)} />
           <div className="side-panel">
             <IncidentPanel
-              incident={selected}
+              incident={(incidents ?? []).find(i=>i.id===selected.id) ?? selected}
               names={names}
               taskNames={taskNames}
               moduleNames={moduleNames}
@@ -121,7 +127,11 @@ export function IncidentForm({
   const [description, setDescription] = useState('')
   const [impact, setImpact] = useState('')
   const [urgency, setUrgency] = useState('medium')
-  const [ownerId, setOwnerId] = useState<number | null>(null)
+  const [ownerId, setOwnerId] = useState<number | null>(me.id)
+  const [sourceId,setSourceId] = useState<number | null>(null)
+  const [depth,setDepth] = useState(1)
+  const [previewBusy,setPreviewBusy] = useState(false)
+  const [busy,setBusy] = useState(false)
   const [targetTasks, setTargetTasks] = useState<number[]>([])
   const [targetUsers, setTargetUsers] = useState<number[]>([])
   const [targetModules, setTargetModules] = useState<number[]>([])
@@ -131,7 +141,7 @@ export function IncidentForm({
   const [error, setError] = useState('')
 
   const openTasks = useMemo(
-    () => tasks.filter((t) => !['done', 'realised', 'trashed'].includes(t.column_key)),
+    () => tasks.filter((t) => t.column_semantic !== 'trash' && t.column_key !== 'trashed'),
     [tasks],
   )
   const filteredTasks = openTasks.filter((t) => {
@@ -141,9 +151,20 @@ export function IncidentForm({
     return true
   })
 
+  useEffect(()=>{
+    let active=true
+    if(sourceId == null) {setTargetTasks([]);setTargetUsers([]);return}
+    setPreviewBusy(true)
+    api.incidentImpact(sourceId,depth).then(result=>{
+      if(active){setTargetTasks(result.task_ids);setTargetUsers(result.user_ids);setError('')}
+    }).catch(e=>{if(active)setError(e.message)}).finally(()=>{if(active)setPreviewBusy(false)})
+    return ()=>{active=false}
+  },[sourceId,depth])
+
   async function submit() {
     if (!title.trim()) return
     setError('')
+    setBusy(true)
     try {
       const targets = [
         ...targetTasks.map((id) => ({ target_type: 'task', target_id: id })),
@@ -157,7 +178,7 @@ export function IncidentForm({
       onCreated()
     } catch (e) {
       setError((e as Error).message)
-    }
+    } finally {setBusy(false)}
   }
 
   return (
@@ -180,24 +201,33 @@ export function IncidentForm({
       <div className="row">
         <Field label="Срочность">
           <select value={urgency} onChange={(e) => setUrgency(e.target.value)}>
-            {['low', 'medium', 'high', 'critical'].map((u) => <option key={u} value={u}>{u}</option>)}
+            {['low', 'medium', 'high', 'critical'].map((u) => <option key={u} value={u}>{PRIORITIES[u] ?? u}</option>)}
           </select>
         </Field>
         <Field label="Ответственный">
           <select value={ownerId ?? ''} onChange={(e) => setOwnerId(e.target.value ? Number(e.target.value) : null)}>
-            <option value="">—</option>
+            <option value="">Автор инцидента</option>
             {participants.map((p) => <option key={p.id} value={p.id}>{p.display_name}</option>)}
           </select>
         </Field>
       </div>
+      <Field label="Исходная задача">
+        <select value={sourceId ?? ''} onChange={e=>setSourceId(e.target.value ? Number(e.target.value):null)}>
+          <option value="">Выберите задачу для автоматического выбора</option>
+          {openTasks.map(t=><option key={t.id} value={t.id}>{t.title}</option>)}
+        </select>
+      </Field>
+      <Field label="Глубина распространения">
+        <input type="number" min="1" max="100" value={depth} onChange={e=>setDepth(Math.max(1,Math.min(100,Number(e.target.value)||1)))}/>
+      </Field>
+      <p className="muted">Изменение исходной задачи или глубины заново выбирает задачи и их исполнителей, заменяя ручные отметки. После расчёта отметки можно изменить вручную. Таймеры продолжают работать.</p>
+      {previewBusy && <p role="status">Расчёт зависимых задач…</p>}
       <Field label={`Затронутые задачи (выбрано: ${targetTasks.length})`}>
         <div className="row" style={{ marginBottom: 6 }}>
           <input placeholder="Поиск по названию…" value={taskSearch} onChange={(e) => setTaskSearch(e.target.value)} />
           <select value={taskColumn} onChange={(e) => setTaskColumn(e.target.value)}>
             <option value="">Все колонки</option>
-            {['backlog', 'todo', 'specification_review', 'in_progress', 'testing', 'review'].map((k) => (
-              <option key={k} value={k}>{k.replace(/_/g, ' ')}</option>
-            ))}
+            {[...new Set(openTasks.map(t=>t.column_key))].map(k=><option key={k} value={k}>{openTasks.find(t=>t.column_key===k)?.column_title ?? 'Колонка'}</option>)}
           </select>
           <label className="row" style={{ cursor: 'pointer', whiteSpace: 'nowrap' }}>
             <input type="checkbox" checked={onlyMine} onChange={(e) => setOnlyMine(e.target.checked)} />
@@ -209,7 +239,7 @@ export function IncidentForm({
             <label key={t.id}>
               <input type="checkbox" checked={targetTasks.includes(t.id)} onChange={(e) => setTargetTasks((prev) => (e.target.checked ? [...prev, t.id] : prev.filter((x) => x !== t.id)))} />
               <span>{t.title}</span>
-              <span className="muted" style={{ fontSize: 11 }}>{t.column_key.replace(/_/g, ' ')}</span>
+              <span className="muted" style={{ fontSize: 11 }}>{t.column_title ?? 'Колонка'}</span>
             </label>
           ))}
           {filteredTasks.length === 0 && <div className="muted" style={{ fontSize: 12, padding: 4 }}>Нет задач</div>}
@@ -240,7 +270,7 @@ export function IncidentForm({
       {error && <div className="error" style={{ marginBottom: 8 }}>{error}</div>}
       <div className="row" style={{ justifyContent: 'flex-end' }}>
         <button onClick={onClose}>Отмена</button>
-        <button className="primary" onClick={submit}>Создать</button>
+        <button className="primary" disabled={busy || previewBusy || !title.trim()} onClick={submit}>{busy ? 'Создание…' : 'Создать'}</button>
       </div>
     </Modal>
   )
@@ -279,12 +309,12 @@ function IncidentPanel({
   return (
     <div>
       <div className="row" style={{ justifyContent: 'space-between' }}>
-        <h3 style={{ margin: 0 }}>#{incident.id} {incident.title}</h3>
+        <h3 style={{ margin: 0 }}>#{incident.number} {incident.title}</h3>
         <button className="ghost small" onClick={onClose}>✕</button>
       </div>
       <div className="row" style={{ margin: '8px 0' }}>
-        <Badge kind={badgeForStatus(incident.level === 'red' && incident.status === 'confirmed' ? 'red' : incident.level)}>{incident.level}</Badge>
-        <Badge kind={badgeForStatus(incident.status)}>{incident.status}</Badge>
+        <Badge kind={incidentKind(incident)}>{incident.level === 'red' ? 'Красный' : 'Жёлтый'}</Badge>
+        <Badge kind={incidentKind(incident)}>{incidentLabel(incident)}</Badge>
         <span className="muted" style={{ fontSize: 12 }}>создан {fmtDate(incident.created_at)}</span>
       </div>
 
@@ -295,7 +325,7 @@ function IncidentPanel({
         <div className="grid" style={{ gap: 4, fontSize: 13 }}>
           {incident.description && <div><b className="muted">Описание:</b> {incident.description}</div>}
           {incident.impact && <div><b className="muted">Влияние:</b> {incident.impact}</div>}
-          <div><b className="muted">Срочность:</b> {incident.urgency ?? '—'}</div>
+          <div><b className="muted">Срочность:</b> {PRIORITIES[incident.urgency ?? ''] ?? '—'}</div>
           <div><b className="muted">Автор:</b> {names.get(incident.author_id) ?? `#${incident.author_id}`}</div>
           <div><b className="muted">Ответственный:</b> {incident.owner_id != null ? (names.get(incident.owner_id) ?? `#${incident.owner_id}`) : '—'}</div>
           {incident.resolution && <div><b className="muted">Решение:</b> {incident.resolution}</div>}
@@ -307,7 +337,7 @@ function IncidentPanel({
           <div className="section-title">Затронутое</div>
           <div className="row" style={{ flexWrap: 'wrap' }}>
             {incident.targets.map((t, i) => (
-              <span key={i} className="badge gray">{t.target_type}: {targetName(t)}</span>
+              <span key={i} className="badge gray">{{task:'Задача',user:'Участник',module:'Модуль'}[t.target_type] ?? 'Объект'}: {targetName(t)}</span>
             ))}
           </div>
         </div>
@@ -341,7 +371,7 @@ function IncidentPanel({
           {incident.events.map((ev) => (
             <div key={ev.id} style={{ fontSize: 13, borderLeft: '2px solid var(--border)', paddingLeft: 8 }}>
               <div className="row" style={{ flexWrap: 'wrap' }}>
-                <b>{ev.event_type}</b>
+                <b>{{created:'Создал инцидент',confirmed:'Подтвердил эскалацию',rejected:'Отклонил эскалацию',resolved:'Закрыл инцидент',comment:'Добавил комментарий'}[ev.event_type] ?? 'Изменение инцидента'}</b>
                 {ev.actor_id != null && (
                   <span style={{ color: 'var(--accent)', fontSize: 12 }}>
                     {names.get(ev.actor_id) ?? `#${ev.actor_id}`}

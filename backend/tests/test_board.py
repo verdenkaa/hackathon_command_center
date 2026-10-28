@@ -62,20 +62,21 @@ def test_custom_column_auto_timer(client):
     assert r.json()["timer"]["state"] == "running"  # правило авто-старта сработало
 
 
-def test_default_column_protected(client):
+def test_default_column_can_be_deleted(client):
     login(client)
     cols = client.get("/api/v1/projects/1/columns").json()
     backlog = next(c for c in cols if c["key"] == "backlog")
     r = client.delete(f"/api/v1/columns/{backlog['id']}")
-    assert r.status_code == 409
-    assert r.json()["error"]["code"] == "COLUMN_PROTECTED"
+    assert r.status_code == 200
 
 
 def test_delete_custom_column_moves_tasks(client):
     login(client)
     col = client.post("/api/v1/projects/1/columns", json={"title": "Custom"}).json()
     t = client.post("/api/v1/projects/1/tasks", json={"title": "B", "column_key": col["key"]}).json()
-    r = client.delete(f"/api/v1/columns/{col['id']}")
+    assert client.delete(f"/api/v1/columns/{col['id']}").status_code == 409
+    backlog = client.get('/api/v1/projects/1/columns').json()[0]
+    r = client.delete(f"/api/v1/columns/{col['id']}?target_column_id={backlog['id']}")
     assert r.status_code == 200
     # Задача вернулась в backlog.
     tasks = client.get("/api/v1/projects/1/tasks").json()

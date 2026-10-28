@@ -1,7 +1,7 @@
 """Проект: сводка, дедлайн (только админ), колонки и модули."""
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from app.api.errors import api_error
@@ -177,6 +177,13 @@ def patch_column(
         column.auto_start_timer = body.auto_start_timer
     if body.auto_stop_timer is not None:
         column.auto_stop_timer = body.auto_stop_timer
+    if body.semantic is not None:
+        column.semantic = body.semantic
+    if body.position is not None:
+        siblings = db.query(BoardColumn).filter(BoardColumn.project_id == column.project_id, BoardColumn.id != column.id).order_by(BoardColumn.position, BoardColumn.id).all()
+        siblings.insert(min(body.position, len(siblings)), column)
+        for position, sibling in enumerate(siblings):
+            sibling.position = position
     write_audit(db, action="column.updated", actor_id=user.id, project_id=column.project_id,
                 entity_type="column", entity_id=column.id)
     db.commit()
@@ -185,16 +192,24 @@ def patch_column(
 
 
 @router.delete("/columns/{column_id}")
-def delete_column(column_id: int, db: Session = Depends(get_db), user: User = Depends(require_member)) -> dict:
+def delete_column(column_id: int, target_column_id: int | None = Query(None), db: Session = Depends(get_db), user: User = Depends(require_member)) -> dict:
     column = db.get(BoardColumn, column_id)
     if column is None:
         raise api_error(404, "NOT_FOUND", "Колонка не найдена")
-    if column.key in DEFAULT_COLUMN_KEYS:
-        raise api_error(409, "COLUMN_PROTECTED", "Стартовые колонки удалять нельзя")
-    backlog = db.query(BoardColumn).filter(
-        BoardColumn.project_id == column.project_id, BoardColumn.key == "backlog"
-    ).first()
-    db.query(Task).filter(Task.column_id == column.id).update({Task.column_id: backlog.id})
+    siblings = db.query(BoardColumn).filter(BoardColumn.project_id == column.project_id, BoardColumn.id != column.id).all()
+    if not siblings:
+        raise api_error(409, 'LAST_COLUMN', 'Нельзя удалить последнюю колонку: задачам нужна колонка для хранения')
+    destination = db.get(BoardColumn, target_column_id) if target_column_id is not None else None
+    if target_column_id is not None and (destination is None or destination.project_id != column.project_id or destination.id == column.id):
+        raise api_error(422, 'INVALID_DESTINATION', 'Выберите другую колонку этого проекта')
+    tasks = db.query(Task).filter(Task.column_id == column.id).all()
+    if tasks and destination is None:
+        raise api_error(409, 'DESTINATION_REQUIRED', f'В колонке {len(tasks)} задач. Выберите колонку для переноса')
+    for task in tasks:
+        task.column_id = destination.id
+        task.version += 1
+        write_audit(db, action='task.moved', actor_id=user.id, project_id=column.project_id, entity_type='task', entity_id=task.id,
+                    data={'from_title':column.title, 'to_title':destination.title, 'from_semantic':column.semantic, 'to_semantic':destination.semantic, 'key':destination.key})
     db.delete(column)
     write_audit(db, action="column.deleted", actor_id=user.id, project_id=column.project_id,
                 entity_type="column", entity_id=column_id)

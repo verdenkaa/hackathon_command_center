@@ -24,7 +24,8 @@ COLUMN_KEYS = [k for k, _ in DEFAULT_COLUMNS]
 
 def create_default_columns(db: Session, project_id: int) -> None:
     for position, (key, title) in enumerate(DEFAULT_COLUMNS):
-        db.add(BoardColumn(project_id=project_id, key=key, title=title, position=position))
+        semantic = 'done' if key in {'done', 'realised'} else 'trash' if key == 'trashed' else 'active' if key in {'in_progress', 'testing', 'review'} else 'normal'
+        db.add(BoardColumn(project_id=project_id, key=key, title=title, position=position, semantic=semantic))
     db.flush()
 
 

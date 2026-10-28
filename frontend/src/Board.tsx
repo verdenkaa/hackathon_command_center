@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { api, Column, DashboardKpi, Incident, Me, Module, Participant, Task } from './api'
-import { Badge, Field, Modal, badgeForStatus, fmt, fmtDate, hmToSeconds, parseUTC, secondsToHm, useLoad } from './ui'
+import { Badge, Field, Modal, badgeForStatus, fmt, fmtDate, hmToSeconds, parseUTC, secondsToHm, useLoad, PRIORITIES, toMoscowInput, fromMoscowInput, incidentKind, incidentLabel } from './ui'
 
 const PRIORITY_COLOR: Record<string, string> = {
   low: '#63a7f5',
@@ -16,16 +16,17 @@ export const LINK_LABELS: Record<string, string> = {
 }
 
 const DONE_KEYS = ['done', 'realised']
+const semantic = (t:Task) => t.column_semantic ?? (DONE_KEYS.includes(t.column_key) ? 'done' : t.column_key==='trashed' ? 'trash' : 'normal')
 
 export function unfinishedBlockers(task: Task, tasks: Task[]): Task[] {
   return task.predecessors
     .filter((p) => p.link_type === 'blocked_by' || p.link_type === 'after')
     .map((p) => tasks.find((t) => t.id === p.task_id))
-    .filter((t): t is Task => !!t && !DONE_KEYS.includes(t.column_key))
+    .filter((t): t is Task => !!t && !['done','trash'].includes(semantic(t)))
 }
 
-function warnIfBlocked(task: Task, tasks: Task[], columnKey: string): boolean {
-  if (!['in_progress', 'testing', 'review'].includes(columnKey)) return true
+function warnIfBlocked(task: Task, tasks: Task[], columnKey: string, columns:Column[]): boolean {
+  if (columns.find(c=>c.key===columnKey)?.semantic !== 'active') return true
   const blockers = unfinishedBlockers(task, tasks)
   if (blockers.length === 0) return true
   const titles = blockers.map((b) => `«${b.title}»`).join(', ')
@@ -34,7 +35,7 @@ function warnIfBlocked(task: Task, tasks: Task[], columnKey: string): boolean {
   )
 }
 
-export default function Board({ me }: { me: Me }) {
+export default function Board({ me, openTaskId, onOpenIncident }: { me: Me; openTaskId?:number|null; onOpenIncident?:(id:number)=>void }) {
   const [columns, setColumns] = useState<Column[]>([])
   const [tasks, setTasks] = useState<Task[]>([])
   const [dash, setDash] = useState<DashboardKpi | null>(null)
@@ -45,7 +46,7 @@ export default function Board({ me }: { me: Me }) {
   const [filterTag, setFilterTag] = useState('')
   const [search, setSearch] = useState('')
   const [createOpen, setCreateOpen] = useState(false)
-  const [selectedId, setSelectedId] = useState<number | null>(null)
+  const [selectedId, setSelectedId] = useState<number | null>(openTaskId ?? null)
   const [draggingId, setDraggingId] = useState<number | null>(null)
   const [error, setError] = useState('')
 
@@ -93,17 +94,6 @@ export default function Board({ me }: { me: Me }) {
       }
     }
     const affected = new Set<number>()
-    let changed = true
-    while (changed) {
-      changed = false
-      for (const task of tasks) {
-        if (blocked.has(task.id) || affected.has(task.id)) continue
-        if (task.predecessors.some((p) => blocked.has(p.task_id) || affected.has(p.task_id))) {
-          affected.add(task.id)
-          changed = true
-        }
-      }
-    }
     return { blockedIds: blocked, affectedIds: affected }
   }, [incidents, tasks])
 
@@ -113,7 +103,7 @@ export default function Board({ me }: { me: Me }) {
     if (draggingId == null) return
     const task = tasks.find((t) => t.id === draggingId)
     if (!task || task.column_key === columnKey) return
-    if (!warnIfBlocked(task, tasks, columnKey)) return
+    if (!warnIfBlocked(task, tasks, columnKey, columns)) return
     try {
       await api.moveTask(task.id, columnKey, task.version)
       reload()
@@ -132,7 +122,8 @@ export default function Board({ me }: { me: Me }) {
         <Kpi label="Завершено" value={dash?.completed_tasks ?? 0} />
         <Kpi label="Просрочено" value={dash?.overdue_tasks ?? 0} warn={(dash?.overdue_tasks ?? 0) > 0} />
         <Kpi label="Активные таймеры" value={dash?.active_timers ?? 0} />
-        <Kpi label="Факт / Календарь" value={`${fmt(dash?.actual_seconds ?? 0)} / ${fmt(dash?.calendar_seconds ?? 0)}`} />
+        <Kpi label="Суммарное время задач" value={fmt(dash?.actual_seconds ?? 0)} />
+        <Kpi label="Время в работе" value={fmt(dash?.calendar_seconds ?? 0)} />
         <div className="grow" />
         <button className="primary" onClick={() => setCreateOpen(true)}>+ Задача</button>
       </div>
@@ -196,7 +187,7 @@ export default function Board({ me }: { me: Me }) {
                     }
                   }}
                   onMove={async (key) => {
-                    if (!warnIfBlocked(task, tasks, key)) return
+                    if (!warnIfBlocked(task, tasks, key, columns)) return
                     try {
                       await api.moveTask(task.id, key, task.version)
                       reload()
@@ -228,6 +219,7 @@ export default function Board({ me }: { me: Me }) {
           <div className="side-backdrop" onClick={() => setSelectedId(null)} />
           <div className="side-panel">
             <TaskPanel
+              onOpenIncident={onOpenIncident}
               key={selected.id}
               task={selected}
               tasks={tasks}
@@ -269,10 +261,13 @@ export function TaskCard({ task, columns, dragging, blocked, affected, onOpen, o
   onDragEnd: () => void
 }) {
   const running = task.timer?.state === 'running'
+  const blockers=task.blocking_incidents ?? []
+  const blockKind=blockers.some(i=>incidentKind(i)==='red')?'red':blockers.some(i=>incidentKind(i)==='purple')?'purple':'yellow'
+  const blockColor=blockKind==='purple'?'#a478e5':blockKind==='red'?'var(--error)':'var(--warn)'
   const overdue =
     task.deadline != null &&
     parseUTC(task.deadline) < new Date() &&
-    !['done', 'realised', 'trashed'].includes(task.column_key)
+    !['done','trash'].includes(semantic(task))
   return (
     <div
       className={`task-card ${overdue ? 'overdue' : ''}`}
@@ -280,14 +275,14 @@ export function TaskCard({ task, columns, dragging, blocked, affected, onOpen, o
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
       onClick={onOpen}
-      style={{ opacity: dragging ? 0.5 : 1, ...(blocked ? { borderColor: 'var(--error)' } : affected ? { borderColor: 'var(--warn)' } : {}) }}
+      style={{ opacity: dragging ? 0.5 : 1, ...(blocked ? { borderColor: blockColor } : affected ? { borderColor: 'var(--warn)' } : {}) }}
     >
       <div style={{ fontWeight: 500, fontSize: 13 }}>{task.title}</div>
       <div className="row" style={{ marginTop: 6, fontSize: 12, flexWrap: 'wrap' }}>
-        {blocked && <span className="badge red">заблокирована</span>}
+        {blocked && <span className={`badge ${blockKind}`}>заблокирована{blockKind==='purple'?' · Ожидает подтверждения':''}</span>}
         {affected && <span className="badge yellow">затронута</span>}
         {overdue && <span className="badge red">просрочена</span>}
-        <span style={{ color: PRIORITY_COLOR[task.priority] ?? 'var(--muted)' }}>{task.priority}</span>
+        <span style={{ color: PRIORITY_COLOR[task.priority] ?? 'var(--muted)' }}>{PRIORITIES[task.priority] ?? task.priority}</span>
         {task.tags?.map((t) => <span key={t} className="badge blue">{t}</span>)}
       </div>
       <div className="row" style={{ marginTop: 6, fontSize: 12, flexWrap: 'wrap' }}>
@@ -340,7 +335,7 @@ export function TaskForm({ columns, onClose, onCreated }: { columns: Column[]; o
   const [estimateHm, setEstimateHm] = useState('')
   const [deadline, setDeadline] = useState('')
   const [tags, setTags] = useState('')
-  const [columnKey, setColumnKey] = useState('backlog')
+  const [columnKey, setColumnKey] = useState(columns.find(c => c.semantic !== 'trash' && c.semantic !== 'done')?.key ?? columns[0]?.key ?? '')
   const [assignees, setAssignees] = useState<Record<number, boolean>>({})
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -353,6 +348,7 @@ export function TaskForm({ columns, onClose, onCreated }: { columns: Column[]; o
     setBusy(true)
     setError('')
     try {
+      if (estimateHm.trim() && hmToSeconds(estimateHm) == null) throw new Error('Введите оценку в формате ч:мм, например 1:30')
       const assigneeList = Object.entries(assignees)
         .filter(([, v]) => v)
         .map(([uid], i) => ({ user_id: Number(uid), is_primary: i === 0 }))
@@ -362,7 +358,7 @@ export function TaskForm({ columns, onClose, onCreated }: { columns: Column[]; o
         priority,
         module_id: moduleId,
         estimate_seconds: hmToSeconds(estimateHm),
-        deadline: deadline ? new Date(deadline).toISOString() : null,
+        deadline: fromMoscowInput(deadline),
         tags: tags.split(',').map((t) => t.trim()).filter(Boolean),
         column_key: columnKey,
       })
@@ -390,7 +386,7 @@ export function TaskForm({ columns, onClose, onCreated }: { columns: Column[]; o
           <Field label="Приоритет">
             <select value={priority} onChange={(e) => setPriority(e.target.value)}>
               {['low', 'medium', 'high', 'critical'].map((p) => (
-                <option key={p} value={p}>{p}</option>
+                <option key={p} value={p}>{PRIORITIES[p] ?? p}</option>
               ))}
             </select>
           </Field>
@@ -410,7 +406,7 @@ export function TaskForm({ columns, onClose, onCreated }: { columns: Column[]; o
           <Field label="Оценка (ч:мм)">
             <input placeholder="1:30" value={estimateHm} onChange={(e) => setEstimateHm(e.target.value)} />
           </Field>
-          <Field label="Дедлайн">
+          <Field label="Срок (МСК)">
             <input type="datetime-local" value={deadline} onChange={(e) => setDeadline(e.target.value)} />
           </Field>
           <Field label="Теги (через запятую)">
@@ -442,9 +438,10 @@ export function TaskForm({ columns, onClose, onCreated }: { columns: Column[]; o
   )
 }
 
-function TaskPanel({
-  task, tasks, participants, modules, columns, isCaptain, onChange, onClose,
+export function TaskPanel({
+  task, tasks, participants, modules, columns, isCaptain, onChange, onClose, onOpenIncident,
 }: {
+  onOpenIncident?: (id:number)=>void
   task: Task
   tasks: Task[]
   participants: Participant[]
@@ -456,15 +453,20 @@ function TaskPanel({
 }) {
   const [desc, setDesc] = useState(task.description ?? '')
   const [title, setTitle] = useState(task.title)
+  const [estimate, setEstimate] = useState(task.estimate_seconds == null ? '' : `${Math.floor(task.estimate_seconds/3600)}:${String(Math.floor(task.estimate_seconds%3600/60)).padStart(2,'0')}`)
+  const [deadline, setDeadline] = useState(toMoscowInput(task.deadline))
+  const [tags, setTags] = useState(task.tags.join(', '))
+  const [saved, setSaved] = useState('')
+  const [historyTick, setHistoryTick] = useState(0)
   const [checkText, setCheckText] = useState('')
   const [depId, setDepId] = useState<number | null>(null)
   const [depType, setDepType] = useState('blocked_by')
   const [subTitle, setSubTitle] = useState('')
   const [adjustH, setAdjustH] = useState('')
   const [error, setError] = useState('')
-  const [history] = useLoad<{ action: string; actor_id: number | null; data: Record<string, unknown>; created_at: string }[]>(
+  const [history] = useLoad<{ text:string; action: string; actor_id: number | null; data: Record<string, unknown>; created_at: string }[]>(
     () => api.taskHistory(task.id),
-    [task.id],
+    [task.id, historyTick],
   )
   const running = task.timer?.state === 'running'
   const subtasks = tasks.filter((t) => t.parent_id === task.id)
@@ -489,6 +491,8 @@ const REVERSE_LABELS: Record<string, string> = {
     setError('')
     try {
       await fn()
+      setSaved('Сохранено')
+      setHistoryTick(v=>v+1)
       onChange()
     } catch (e) {
       setError((e as Error).message)
@@ -524,14 +528,19 @@ const REVERSE_LABELS: Record<string, string> = {
         <button className="ghost small" onClick={onClose}>✕</button>
       </div>
       <div className="row" style={{ margin: '8px 0', flexWrap: 'wrap' }}>
-        <Badge kind={badgeForStatus(task.column_key === 'done' || task.column_key === 'realised' ? 'done' : 'open')}>
-          {task.column_key.replace(/_/g, ' ')}
+        <Badge kind={badgeForStatus(semantic(task) === 'done' ? 'done' : 'open')}>
+          {columns.find(c=>c.id === task.column_id)?.title ?? 'Колонка'}
         </Badge>
-        <span className="muted" style={{ fontSize: 12 }}>приоритет {task.priority}</span>
+        <span className="muted" style={{ fontSize: 12 }}>приоритет {PRIORITIES[task.priority] ?? task.priority}</span>
         {task.deadline && <span className="muted" style={{ fontSize: 12 }}>до {fmtDate(task.deadline)}</span>}
       </div>
 
-      {error && <div className="error" style={{ margin: '8px 0' }}>{error}</div>}
+      {error && <div className="error" role="alert" style={{ margin: '8px 0' }}>{error}</div>}
+      {saved && <div role="status" className="muted">{saved}</div>}
+      {(task.blocking_incidents ?? []).map(i => <div key={i.id} className="card" style={{marginTop:8,borderColor:incidentKind(i)==='purple'?'#a478e5':incidentKind(i)==='red'?'var(--error)':'var(--warn)'}}>
+        <Badge kind={incidentKind(i)}>{incidentLabel(i)}</Badge> {i.level === 'red' ? 'Красный' : 'Жёлтый'} инцидент
+        <button className="ghost" onClick={()=>onOpenIncident?.(i.id)}>#{i.number} {i.title}</button>
+      </div>)}
 
       <div className="section">
         <div className="section-title">Статус и свойства</div>
@@ -539,14 +548,14 @@ const REVERSE_LABELS: Record<string, string> = {
           <select
             value={task.column_key}
             onChange={(e) => {
-              if (!warnIfBlocked(task, tasks, e.target.value)) return
+              if (!warnIfBlocked(task, tasks, e.target.value, columns)) return
               run(() => api.moveTask(task.id, e.target.value, task.version))
             }}
           >
             {columns.map((c) => <option key={c.id} value={c.key}>{c.title}</option>)}
           </select>
           <select value={task.priority} onChange={(e) => run(() => api.patchTask(task.id, { priority: e.target.value }, task.version))}>
-            {['low', 'medium', 'high', 'critical'].map((p) => <option key={p} value={p}>{p}</option>)}
+            {['low', 'medium', 'high', 'critical'].map((p) => <option key={p} value={p}>{PRIORITIES[p] ?? p}</option>)}
           </select>
           <select
             value={task.module_id ?? ''}
@@ -568,6 +577,13 @@ const REVERSE_LABELS: Record<string, string> = {
 
       <div className="section">
         <div className="section-title">Исполнители</div>
+        <Field label="Основной исполнитель">
+          <select value={task.assignees.find(a=>a.is_primary)?.user_id ?? ''} disabled={!task.assignees.length}
+            onChange={e=>setAssignees([Number(e.target.value), ...task.assignees.filter(a=>a.user_id!==Number(e.target.value)).map(a=>a.user_id)])}>
+            {!task.assignees.length && <option value="">Сначала выберите исполнителей</option>}
+            {task.assignees.map(a=><option key={a.user_id} value={a.user_id}>{a.display_name}</option>)}
+          </select>
+        </Field>
         <div className="check-list">
           {participants.map((p) => {
             const checked = task.assignees.some((a) => a.user_id === p.id)
@@ -593,6 +609,28 @@ const REVERSE_LABELS: Record<string, string> = {
 
       <div className="section">
         <div className="section-title">Время</div>
+        <Field label="Плановая оценка (ч:мм)">
+          <div className="row">
+            <input aria-label="Плановая оценка" placeholder="1:30" value={estimate} onChange={e=>setEstimate(e.target.value)}/>
+            <button onClick={()=>run(async()=>{
+              const value=hmToSeconds(estimate)
+              if (estimate.trim() && value == null) throw new Error('Введите оценку в формате ч:мм, например 1:30')
+              await api.patchTask(task.id,{estimate_seconds:value},task.version)
+            })}>Сохранить оценку</button>
+          </div>
+        </Field>
+        <Field label="Срок (МСК)">
+          <div className="row">
+            <input type="datetime-local" value={deadline} onChange={e=>setDeadline(e.target.value)}/>
+            <button onClick={()=>run(()=>api.patchTask(task.id,{deadline:fromMoscowInput(deadline)},task.version))}>Сохранить срок</button>
+          </div>
+        </Field>
+        <Field label="Теги (через запятую)">
+          <div className="row">
+            <input value={tags} onChange={e=>setTags(e.target.value)}/>
+            <button onClick={()=>run(()=>api.patchTask(task.id,{tags:tags.split(',').map(t=>t.trim()).filter(Boolean)},task.version))}>Сохранить теги</button>
+          </div>
+        </Field>
         <div className="row">
           {!running && <button className="primary small" onClick={() => run(() => api.timer(task.id, 'start'))}>▶ Старт</button>}
           {running && (
@@ -616,10 +654,10 @@ const REVERSE_LABELS: Record<string, string> = {
               type="number"
               min="0"
               step="0.5"
-              placeholder="Скорректировать время (часов)"
+              aria-label="Фактическое время, часов" placeholder="Фактическое время, часов"
               value={adjustH}
               onChange={(e) => setAdjustH(e.target.value)}
-              style={{ maxWidth: 220 }}
+              style={{ width:'100%', minWidth:0 }}
             />
             <button
               className="small"
@@ -666,8 +704,8 @@ const REVERSE_LABELS: Record<string, string> = {
           <div key={p.pred.id} className="row" style={{ padding: '2px 0' }}>
             <span className="badge blue">{LINK_LABELS[p.linkType] ?? p.linkType}</span>
             <span>{p.pred.title}</span>
-            <Badge kind={DONE_KEYS.includes(p.pred.column_key) ? 'green' : 'yellow'}>
-              {DONE_KEYS.includes(p.pred.column_key) ? 'готово' : 'не завершено'}
+            <Badge kind={semantic(p.pred)==='done' ? 'green' : 'yellow'}>
+              {p.pred.column_semantic === 'trash' ? 'в корзине' : p.pred.column_semantic === 'done' ? 'готово' : 'не завершено'}
             </Badge>
             <span className="grow" />
             <button className="small ghost" onClick={() => run(() => api.removeDependency(task.id, p.pred.id))}>✕</button>
@@ -680,8 +718,8 @@ const REVERSE_LABELS: Record<string, string> = {
           <div key={r.dep.id} className="row" style={{ padding: '2px 0' }}>
             <span className="badge gray">{REVERSE_LABELS[r.linkType] ?? r.linkType}</span>
             <span className="muted">{r.dep.title}</span>
-            <Badge kind={DONE_KEYS.includes(r.dep.column_key) ? 'green' : 'yellow'}>
-              {DONE_KEYS.includes(r.dep.column_key) ? 'готово' : 'не завершено'}
+            <Badge kind={semantic(r.dep)==='done' ? 'green' : 'yellow'}>
+              {semantic(r.dep)==='done' ? 'готово' : 'не завершено'}
             </Badge>
           </div>
         ))}
@@ -693,7 +731,7 @@ const REVERSE_LABELS: Record<string, string> = {
           </select>
           <select value={depId ?? ''} onChange={(e) => setDepId(e.target.value ? Number(e.target.value) : null)}>
             <option value="">+ задача…</option>
-            {tasks.filter((t) => t.id !== task.id && !task.predecessors.some((x) => x.task_id === t.id)).map((t) => (
+            {tasks.filter((t) => t.project_id === task.project_id && t.column_semantic !== 'trash' && t.id !== task.id && !task.predecessors.some((x) => x.task_id === t.id)).map((t) => (
               <option key={t.id} value={t.id}>{t.title}</option>
             ))}
           </select>
@@ -714,10 +752,16 @@ const REVERSE_LABELS: Record<string, string> = {
 
       <div className="section">
         <div className="section-title">Подзадачи</div>
+        <Field label="Родительская задача">
+          <select value={task.parent_id ?? ''} onChange={e=>run(()=>api.patchTask(task.id,{parent_id:e.target.value?Number(e.target.value):null},task.version))}>
+            <option value="">Без родителя</option>
+            {tasks.filter(t=>t.id!==task.id && t.project_id===task.project_id && semantic(t)!=='trash').map(t=><option key={t.id} value={t.id}>{t.title}</option>)}
+          </select>
+        </Field>
         {subtasks.map((s) => (
           <div key={s.id} className="row" style={{ padding: '2px 0' }}>
             <span>{s.title}</span>
-            <Badge kind={['done', 'realised'].includes(s.column_key) ? 'green' : 'gray'}>{s.column_key.replace(/_/g, ' ')}</Badge>
+            <Badge kind={semantic(s)==='done' ? 'green' : 'gray'}>{columns.find(c=>c.id===s.column_id)?.title ?? 'Колонка'}</Badge>
           </div>
         ))}
         <div className="row" style={{ marginTop: 6 }}>
@@ -726,7 +770,7 @@ const REVERSE_LABELS: Record<string, string> = {
             className="small"
             onClick={async () => {
               if (!subTitle.trim()) return
-              await run(() => api.createTask({ title: subTitle.trim(), parent_id: task.id, column_key: 'backlog' }))
+              await run(() => api.createTask({ title: subTitle.trim(), parent_id: task.id, column_key: columns.find(c=>c.semantic === 'normal')?.key ?? columns[0]?.key }))
               setSubTitle('')
             }}
           >
@@ -741,14 +785,10 @@ const REVERSE_LABELS: Record<string, string> = {
           {(history ?? []).map((h, i) => (
             <div key={i} style={{ fontSize: 12, borderLeft: '2px solid var(--border)', paddingLeft: 8 }}>
               <div className="row">
-                <b>{h.action}</b>
+                <span>{h.text ?? 'Изменение задачи'}</span>
                 <span className="muted" style={{ fontSize: 11 }}>{fmtDate(h.created_at)}</span>
               </div>
-              {h.data && Object.keys(h.data).length > 0 && (
-                <div className="muted mono" style={{ fontSize: 11 }}>
-                  {JSON.stringify(h.data)}
-                </div>
-              )}
+
             </div>
           ))}
           {(history ?? []).length === 0 && <div className="muted" style={{ fontSize: 12 }}>Изменений нет</div>}
