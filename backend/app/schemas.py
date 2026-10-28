@@ -484,9 +484,12 @@ class AiSettingsOut(BaseModel):
     prompt: str
     interval_minutes: int
     triggers: dict
+    auto_enabled: bool
+    next_run_at: datetime | None
 
 
 class AiSettingsPatch(BaseModel):
+    auto_enabled: bool | None = None
     enabled: bool | None = None
     priority_provider: Literal['gemini', 'deepseek'] | None = None
     prompt: str | None = None
@@ -509,4 +512,12 @@ class AiRecommendationOut(BaseModel):
     content: str
     request_context: dict | None = None
     excluded: bool
+    structured: dict | None = None
+    status: str = 'unreviewed'
+    status_by: int | None = None
+    status_at: datetime | None = None
+    comment: str = ''
+    snapshot_at: datetime | None = None
+    snapshot_version: str | None = None
+    last_seen_at: datetime | None = None
     created_at: datetime

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api, AiSettings, Me, currentProject } from './api'
 import { Badge, Field, fmtDate, useLoad, Modal, toMoscowInput, fromMoscowInput } from './ui'
-import { AI_TRIGGERS } from './MockAi'
+import { AdvisorProviderSettings } from './Advisor'
 import { Sandbox } from './Sandbox'
 
 export function Settings({ me, onProjectsChanged, onOpenProject }: {
@@ -22,6 +22,7 @@ export function Settings({ me, onProjectsChanged, onOpenProject }: {
       <ModulesSection setMsg={setMsg} />
       <CompletionSection isCaptain={isCaptain} setMsg={setMsg} />
       <AiSection isCaptain={isCaptain} setMsg={setMsg} />
+      {isAdmin && <AdvisorProviderSettings/>}
     </div>
     {isAdmin && <details className="card" style={{maxWidth:1100,marginTop:24}}>
       <summary style={{cursor:'pointer',fontWeight:600}}>Песочница · тестирование и очистка</summary>
@@ -361,22 +362,23 @@ function CompletionSection({ isCaptain, setMsg }: { isCaptain: boolean; setMsg: 
 }
 
 function AiSection({ isCaptain, setMsg }: { isCaptain: boolean; setMsg: (s: string) => void }) {
-  const [settings, , reload] = useLoad<AiSettings>(api.aiSettings)
+  const [settings, error, reload] = useLoad<AiSettings>(api.aiSettings)
   const [enabled, setEnabled] = useState<boolean | null>(null)
-  const [provider, setProvider] = useState('')
+  const [autoEnabled, setAutoEnabled] = useState<boolean | null>(null)
   const [interval, setIntervalMin] = useState('')
   const [prompt, setPrompt] = useState<string | null>(null)
-  const [triggers, setTriggers] = useState<Record<string, boolean> | null>(null)
+  const [saveError, setSaveError] = useState('')
+  const [busy, setBusy] = useState(false)
 
-  if (!settings) return null
+  if (!settings) return <p role={error?'alert':'status'}>{error||'Загрузка настроек ИИ…'}</p>
   const effEnabled = enabled ?? settings.enabled
-  const effProvider = provider || settings.priority_provider
+  const effAutoEnabled = autoEnabled ?? settings.auto_enabled
   const effInterval = interval || String(settings.interval_minutes)
 
   return (
     <div className="card section">
       <div className="section-title">ИИ-советник</div>
-      <p className="muted">Режим моков: Gemini и DeepSeek не вызываются. Контекст запроса доступен в аналитике.</p>
+      <p className="muted">Gemini анализирует снимок проекта и отвечает на вопросы. Советы не изменяют задачи автоматически.</p>
       <div className="row" style={{ marginBottom: 8 }}>
         <label className="row" style={{ cursor: 'pointer' }}>
           <input
@@ -390,44 +392,37 @@ function AiSection({ isCaptain, setMsg }: { isCaptain: boolean; setMsg: (s: stri
         <Badge kind={effEnabled ? 'green' : 'gray'}>{effEnabled ? 'включён' : 'выключен'}</Badge>
       </div>
       <div className="row">
-        <Field label="Приоритетный провайдер">
-          <select value={effProvider} disabled={!isCaptain} onChange={(e) => setProvider(e.target.value)}>
-            <option value="gemini">Gemini (мок)</option>
-            <option value="deepseek">DeepSeek (мок)</option>
-          </select>
-        </Field>
+        <label className="row"><input type="checkbox" style={{width:'auto'}} checked={effAutoEnabled} disabled={!isCaptain} onChange={e=>setAutoEnabled(e.target.checked)}/>Автоматический анализ</label>
         <Field label="Интервал (минут)">
           <input type="number" min="5" value={effInterval} disabled={!isCaptain} onChange={(e) => setIntervalMin(e.target.value)} />
         </Field>
       </div>
-      <Field label="Промпт советника">
+      <p className="muted">Следующий запуск: {fmtDate(settings.next_run_at)}. Только во время проекта; после перезапуска — не более одного актуального анализа.</p>
+      <Field label="Контекст команды для советника">
         <textarea rows={5} value={prompt ?? settings.prompt} disabled={!isCaptain} onChange={(e) => setPrompt(e.target.value)} />
       </Field>
-      <div className="section-title">События для ИИ</div>
-      {Object.entries(AI_TRIGGERS).map(([key, label]) => <label className="row" key={key} style={{marginBottom:6}}>
-        <input type="checkbox" style={{width:'auto'}} disabled={!isCaptain}
-          checked={(triggers ?? settings.triggers)[key] ?? false}
-          onChange={(e) => setTriggers({...settings.triggers, ...triggers, [key]:e.target.checked})} />
-        {label}
-      </label>)}
-      {isCaptain && (enabled !== null || provider !== '' || interval !== '' || prompt !== null || triggers !== null) && (
+      <p className="muted">Ручные запросы и решения доступны капитану и администратору. Историю видят все участники.</p>
+      {saveError&&<p className="error" role="alert">{saveError}</p>}
+      {isCaptain && (enabled !== null || autoEnabled !== null || interval !== '' || prompt !== null) && (
         <button
           className="primary small"
+          disabled={busy}
           onClick={async () => {
+            setBusy(true);setSaveError('')
+            try {
             await api.patchAiSettings({
               enabled: effEnabled,
-              priority_provider: effProvider,
+              auto_enabled: effAutoEnabled,
               interval_minutes: Number(effInterval),
               prompt: prompt ?? settings.prompt,
-              triggers: triggers ?? settings.triggers,
             })
             setEnabled(null)
-            setProvider('')
+            setAutoEnabled(null)
             setIntervalMin('')
             setPrompt(null)
-            setTriggers(null)
             reload()
             setMsg('Настройки ИИ сохранены')
+            } catch(e){setSaveError((e as Error).message)} finally{setBusy(false)}
           }}
         >
           Сохранить настройки ИИ

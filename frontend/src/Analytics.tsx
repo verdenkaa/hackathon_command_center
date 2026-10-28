@@ -1,15 +1,13 @@
-import { useEffect, useState } from 'react'
-import { api, Analytics as AnalyticsData, Recommendation, Me, currentProject, SummaryTask } from './api'
+import { useEffect } from 'react'
+import { api, Analytics as AnalyticsData, Me, currentProject, SummaryTask } from './api'
 import { useProjectUpdates } from './realtime'
-import { MockAi, AiRequestView } from './MockAi'
+import { Advisor } from './Advisor'
 import { Badge, badgeForStatus, fmt, fmtDuration, fmtDate, useLoad, incidentKind, incidentLabel } from './ui'
 
 export function Analytics({ me, onOpenTask, onOpenIncident, onPlanning }: {
   me: Me; onOpenTask:(id:number)=>void; onOpenIncident:(id:number)=>void; onPlanning:()=>void
 }) {
   const [data, error, reload] = useLoad<AnalyticsData>(api.analytics)
-  const [recs, , reloadRecs] = useLoad<Recommendation[]>(api.recommendations)
-  const [msg, setMsg] = useState('')
   const isCaptain = me.roles.some((r) => r.role === 'admin' || (r.role === 'captain' && r.project_id === currentProject()))
   useProjectUpdates(reload)
   useEffect(() => {
@@ -34,36 +32,7 @@ export function Analytics({ me, onOpenTask, onOpenIncident, onPlanning }: {
         {data.time_by_user.map(t=><p key={t.user_id??'none'}>{t.display_name}: {fmt(t.seconds)}</p>)}
         <p className="muted">Время общих задач не делится между участниками и не отражает личное отработанное время.</p>
       </details>
-      <div className="card" style={{ marginTop: 16 }}>
-        <div className="row" style={{ justifyContent: 'space-between' }}>
-          <div className="section-title" style={{ margin: 0 }}>Рекомендации ИИ</div>
-          <Badge kind="blue">мок · без внешних запросов</Badge>
-        </div>
-        <MockAi onRun={reloadRecs} />
-        {msg && <div className="error" style={{ marginTop: 6 }}>{msg}</div>}
-        <div className="grid" style={{ gap: 8, marginTop: 8 }}>
-          {(recs ?? []).slice(0, 10).map((r) => (
-            <div key={r.id} style={{ borderLeft: '2px solid var(--accent)', paddingLeft: 10 }}>
-              <div className="row" style={{ flexWrap: 'wrap' }}>
-                <b>{r.summary}</b>
-                <span className="muted" style={{ fontSize: 11 }}>{r.trigger} · {fmtDate(r.created_at)}</span>
-              </div>
-              <div style={{ fontSize: 13, marginTop: 2 }}>{r.content}</div>
-              <div className="muted">{r.excluded ? 'Исключена из следующего контекста' : 'Может войти в контекст следующих запросов'}</div>
-              {isCaptain && <button className="small" onClick={async () => {
-                try { await api.excludeRecommendation(r.id); reloadRecs() }
-                catch (e) { setMsg((e as Error).message) }
-              }}>{r.excluded ? 'Вернуть в контекст' : 'Исключить из контекста'}</button>}
-              {r.request_context && <details><summary>Сохранённый запрос · {r.provider} · mock</summary><AiRequestView context={r.request_context}/></details>}
-            </div>
-          ))}
-          {(recs ?? []).length === 0 && (
-            <div className="muted" style={{ fontSize: 13 }}>
-              Рекомендаций пока нет. Включите ИИ в настройках и запросите анализ.
-            </div>
-          )}
-        </div>
-      </div>
+      <Advisor canManage={isCaptain&&s.project_state!=='completed'} onOpenTask={onOpenTask} onOpenIncident={onOpenIncident} onPlanning={onPlanning}/>
     </div>
   )
 }
@@ -81,7 +50,7 @@ export function OperationalSections({summary:s,onOpenTask,onOpenIncident}:{summa
     <section className="card"><h3>Участники и нагрузка</h3>
       <p className="muted">В работе: 1 — зелёный, 2 — жёлтый, 0 или 3+ — красный. Доступны: 0 — красный, 1+ — зелёный. Ожидают: 0–3 — зелёный, 4+ — красный. Инциденты и пересечения: 0 — зелёный, 1+ — красный.</p>
       <div className="workload-scroll" role="region" aria-label="Таблица нагрузки участников" tabIndex={0}><table className="workload-table"><thead><tr><th scope="col">Участник</th><th scope="col">В работе</th><th scope="col">Доступны</th><th scope="col">Ожидают</th><th scope="col">Инциденты</th><th scope="col">Пересечения</th><th scope="col">Ближайшие задачи и сроки (МСК)</th></tr></thead><tbody>
-      {s.participants.map(p=><tr key={p.id}><th scope="row">{p.display_name}<div><Badge kind={badgeForStatus(p.traffic_status)}>{{green:'Нет прямых инцидентов',yellow:'Жёлтый блокер',red:'Красный блокер',purple:'Ожидает подтверждения'}[p.traffic_status]}</Badge></div></th>
+      {s.participants.map(p=><tr key={p.id} id={`advisor-user-${p.id}`}><th scope="row">{p.display_name}<div><Badge kind={badgeForStatus(p.traffic_status)}>{{green:'Нет прямых инцидентов',yellow:'Жёлтый блокер',red:'Красный блокер',purple:'Ожидает подтверждения'}[p.traffic_status]}</Badge></div></th>
         <td><WorkloadValue label="В работе" value={p.active_ids.length} tone={p.active_ids.length===1?'good':p.active_ids.length===2?'warn':'bad'} hint={p.active_ids.length?'есть активные задачи':'нет активных задач'}/></td>
         <td><WorkloadValue label="Доступны" value={p.ready_ids.length} tone={p.ready_ids.length?'good':'bad'} hint={p.ready_ids.length?'можно взять в работу':'нет доступных задач'}/></td>
         <td><WorkloadValue label="Ожидают" value={p.waiting_ids.length} tone={p.waiting_ids.length>3?'bad':'good'} hint={p.waiting_ids.length?'ожидают зависимостей':'нет ожидания'}/></td>
@@ -105,7 +74,7 @@ export function OperationalSections({summary:s,onOpenTask,onOpenIncident}:{summa
         {i.limitations.map((l,j)=><p className="muted" key={j}>{l}</p>)}
       </article>)}</div>
     </details>
-    <section className="card"><h3>Треки</h3><div className="scan-grid">{s.tracks.map(track=><article className="scan-card" key={track.id??'none'}>
+    <section className="card"><h3>Треки</h3><div className="scan-grid">{s.tracks.map(track=><article className="scan-card" key={track.id??'none'} id={`advisor-track-${track.id}`}>
       <h4>{track.name}</h4><ProgressLine label={`Прогресс трека ${track.name}`} value={track.percent} color="var(--ok)"/><p className="muted">Завершено {track.done} из {track.total} задач</p>
       <div className="scan-stats">{stat('В работе',track.active)}{stat('Ожидают',track.waiting,track.waiting?'warn':'good')}{stat('Просрочено',track.overdue,track.overdue?'bad':'good')}{stat('С препятствиями',track.blocked,track.blocked?'bad':'good')}{stat('Инциденты',track.incident_ids.length,track.incident_ids.length?'bad':'good')}{stat('Не назначен исполнитель',s.tasks.filter(t=>track.task_ids.includes(t.id)&&!t.assignees.length).length,s.tasks.some(t=>track.task_ids.includes(t.id)&&!t.assignees.length)?'bad':'good')}</div>
       {nearest(track.task_ids)}

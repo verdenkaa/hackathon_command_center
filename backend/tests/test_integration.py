@@ -47,7 +47,11 @@ def test_full_cycle(client):
     # 6. Дашборд и ИИ.
     assert client.get("/api/v1/projects/1/dashboard").status_code == 200
     client.patch("/api/v1/projects/1/ai/settings", json={"enabled": True})
-    assert client.post("/api/v1/projects/1/ai/run", json={"trigger": "manual"}).status_code == 200
+    # No real key is provisioned in this isolated integration test.
+    from unittest.mock import patch
+    with patch('app.services.advisor.vault.is_saved', return_value=False):
+        response = client.post("/api/v1/projects/1/ai/run", json={"trigger": "manual"})
+    assert response.status_code == 409 and response.json()['error']['code'] == 'KEY_MISSING'
 
     # 7. Бэкап и восстановление.
     bid = client.post("/api/v1/admin/backups").json()["id"]

@@ -18,16 +18,15 @@ def test_ai_run_requires_enabled(client):
     assert r.json()["error"]["code"] == "AI_DISABLED"
 
 
-def test_ai_run_mock(client):
+def test_legacy_mock_history_remains_readable(client):
     login(client)
     assert client.patch("/api/v1/projects/1/ai/settings", json={"enabled": True}).status_code == 200
-    r = client.post("/api/v1/projects/1/ai/run", json={"trigger": "manual"})
-    assert r.status_code == 200
-    body = r.json()
-    assert body["provider"] == "gemini"
-    assert body["trigger"] == "manual"
-    assert body["summary"]
-    assert body["content"]
+    from tests.conftest import TestingSessionLocal
+    from app.services.ai import run_recommendation
+    with TestingSessionLocal() as db:
+        rec = run_recommendation(db, 1, 'manual')
+        assert rec.summary and rec.content
+        db.commit()
 
     recs = client.get("/api/v1/projects/1/ai/recommendations").json()
     assert len(recs) == 1
@@ -45,17 +44,19 @@ def test_ai_settings_requires_captain(client):
 def test_ai_rate_limit(client):
     login(client)
     client.patch("/api/v1/projects/1/ai/settings", json={"enabled": True, "interval_minutes": 60})
-    # Ручной запуск не лимитируется.
-    assert client.post("/api/v1/projects/1/ai/run", json={"trigger": "manual"}).status_code == 200
-    # Событийный запуск сразу после — ограничен.
+    # An API caller cannot impersonate the automatic scheduler.
     r = client.post("/api/v1/projects/1/ai/run", json={"trigger": "overdue"})
-    assert r.status_code == 429
+    assert r.status_code == 422
 
 
 def test_ai_exclude_recommendation(client):
     login(client)
     client.patch("/api/v1/projects/1/ai/settings", json={"enabled": True})
-    rid = client.post("/api/v1/projects/1/ai/run", json={"trigger": "manual"}).json()["id"]
+    from tests.conftest import TestingSessionLocal
+    from app.services.ai import run_recommendation
+    with TestingSessionLocal() as db:
+        rid = run_recommendation(db, 1, 'manual').id
+        db.commit()
     r = client.post(f"/api/v1/projects/1/ai/recommendations/{rid}/exclude")
     assert r.status_code == 200
     assert r.json()["excluded"] is True

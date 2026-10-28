@@ -151,15 +151,5 @@ def run_recommendation(db: Session, project_id: int, trigger: str, question: str
 
 
 def maybe_recommend(db: Session, project_id: int, trigger: str) -> bool:
-    """Run enabled mock triggers within the same event transaction."""
-    from fastapi import HTTPException
-    settings = db.query(AiSettings).filter(AiSettings.project_id == project_id).first()
-    if settings is None or not settings.enabled or not settings.triggers.get(trigger, False):
-        return False
-    try:
-        run_recommendation(db, project_id, trigger)
-        return True
-    except HTTPException as exc:
-        if exc.status_code in (409, 429):
-            return False
-        raise
+    """Legacy mock events are disabled; the advisor has a persistent interval scheduler."""
+    return False

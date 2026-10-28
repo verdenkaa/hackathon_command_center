@@ -397,3 +397,21 @@ input[type="datetime-local"] { min-width: 180px; color-scheme: dark; }
 .gantt-time-marker>span {position:sticky;top:50px;display:inline-block;white-space:nowrap}
 @media(max-width:760px){.analytics-progress-grid {grid-template-columns:1fr}.operational-analytics .card {padding:12px}.operational-analytics .row {flex-wrap:wrap}}
 @media(max-width:700px){.topbar nav.tabs {flex-basis:100%!important;min-width:0;flex-wrap:wrap}.topbar .project-select {max-width:100%}}
+/* Project advisor: compact evidence cards and a separate question flow. */
+.advisor-panel { margin-top: 16px; min-width: 0; }
+.advisor-list { display: grid; gap: 12px; margin: 16px 0; }
+.advisor-advice { padding: 14px; border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: 8px; overflow-wrap: anywhere; min-width: 0; }
+.advisor-advice.significance-warning { border-left-color: var(--warn); }
+.advisor-advice.significance-critical { border-left-color: var(--danger, #ed6577); }
+.advisor-advice dl { display: grid; grid-template-columns: minmax(100px, 150px) minmax(0, 1fr); gap: 8px 12px; font-size: 13px; }
+.advisor-advice dt { color: var(--muted); }
+.advisor-advice dd { margin: 0; white-space: pre-wrap; }
+.advisor-budget { display: flex; flex-wrap: wrap; gap: 8px 18px; padding: 12px; background: rgba(100,140,200,.08); border-radius: 8px; margin-bottom: 12px; }
+.advisor-budget small { width: 100%; color: var(--muted); }
+.advisor-warning { color: var(--warn); }
+.advisor-panel .scan-actions a { color: var(--accent); font-size: 12px; padding: 3px 7px; border: 1px solid var(--border); border-radius: 4px; text-decoration: none; }
+.advisor-question { border-top: 1px solid var(--border); margin-top: 16px; padding-top: 12px; }
+.advisor-answer { padding: 12px 0; border-bottom: 1px solid var(--border); overflow-wrap: anywhere; }
+.advisor-controls { display: grid; gap: 8px; margin-top: 10px; }
+[id^="advisor-"] { scroll-margin-top: 90px; }
+@media(max-width: 600px) { .advisor-advice dl { grid-template-columns: minmax(0,1fr); gap: 4px; } .advisor-advice dd { margin-bottom: 8px; } .advisor-budget { flex-direction: column; } .advisor-panel .scan-heading { flex-wrap: wrap; } }

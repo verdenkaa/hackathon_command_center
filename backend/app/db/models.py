@@ -410,6 +410,8 @@ class AiSettings(Base):
     prompt: Mapped[str] = mapped_column(Text, nullable=False)
     interval_minutes: Mapped[int] = mapped_column(Integer, default=30, nullable=False)
     triggers: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    auto_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    next_run_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
@@ -425,7 +427,63 @@ class AiRecommendation(Base):
     content: Mapped[str] = mapped_column(Text, nullable=False)
     request_context: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     excluded: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    structured: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    status: Mapped[str] = mapped_column(String(16), default='unreviewed', nullable=False)
+    status_by: Mapped[int | None] = mapped_column(ForeignKey('users.id'), nullable=True)
+    status_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    comment: Mapped[str] = mapped_column(Text, default='', nullable=False)
+    snapshot_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    snapshot_version: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class AdvisorProviderSettings(Base):
+    __tablename__ = 'advisor_provider_settings'
+    id: Mapped[int] = mapped_column(primary_key=True)
+    model: Mapped[str] = mapped_column(String(120), default='gemini-3.5-flash-lite')
+    rpm: Mapped[int] = mapped_column(default=15)
+    rpd: Mapped[int] = mapped_column(default=500)
+    tpm: Mapped[int] = mapped_column(default=200000)
+    max_attempts: Mapped[int] = mapped_column(default=3)
+    max_input_tokens: Mapped[int] = mapped_column(default=100000)
+    lock_version: Mapped[int] = mapped_column(default=0)
+
+
+class AdvisorJob(Base):
+    __tablename__ = 'advisor_jobs'
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey('projects.id'), index=True)
+    user_id: Mapped[int | None] = mapped_column(ForeignKey('users.id'), nullable=True)
+    kind: Mapped[str] = mapped_column(String(16))
+    trigger: Mapped[str] = mapped_column(String(16))
+    priority: Mapped[int] = mapped_column(default=1)
+    question: Mapped[str] = mapped_column(Text, default='')
+    state: Mapped[str] = mapped_column(String(16), default='queued', index=True)
+    attempts: Mapped[int] = mapped_column(default=0)
+    snapshot: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    snapshot_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    snapshot_version: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    answer: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    error_code: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    lease_until: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    lease_token: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    next_attempt_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class AdvisorAttempt(Base):
+    __tablename__ = 'advisor_attempts'
+    id: Mapped[int] = mapped_column(primary_key=True)
+    job_id: Mapped[int] = mapped_column(Integer, index=True)
+    reserved_tokens: Mapped[int] = mapped_column(Integer)
+    actual_input: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    actual_output: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    actual_thinking: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    outcome: Mapped[str] = mapped_column(String(40), default='reserved')
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
 
 
 class TelegramDelivery(Base):

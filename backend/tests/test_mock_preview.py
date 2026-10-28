@@ -14,9 +14,17 @@ def test_ai_preview_and_saved_context(client):
     assert body['mode'] == 'mock'
     assert body['prompt'] == 'Проверь риски'
     assert body['snapshot']['tasks'][0]['description'] == 'Важное описание'
-    rec = client.post('/api/v1/projects/1/ai/run', json={'trigger': 'manual'}).json()
+    from tests.conftest import TestingSessionLocal
+    from app.services.ai import run_recommendation
+    with TestingSessionLocal() as db:
+        row = run_recommendation(db, 1, 'manual')
+        rec = {'request_context': row.request_context}
+        db.commit()
+    # Separate snapshots have distinct calculation timestamps.
+    rec['request_context']['snapshot']['analytics_summary'].pop('generated_at')
+    body['snapshot']['analytics_summary'].pop('generated_at')
     assert rec['request_context'] == body
-    assert client.post('/api/v1/projects/1/ai/run', json={'trigger': 'overdue'}).status_code == 409
+    assert client.post('/api/v1/projects/1/ai/run', json={'trigger': 'overdue'}).status_code == 422
 
 
 def test_telegram_mock_journal(client):
@@ -43,11 +51,9 @@ def test_sandbox_notifications_do_not_touch_working_project(client):
     assert {'task_assigned', 'incident_yellow_created', 'task_overdue'} <= {m['event_type'] for m in rows}
 
 
-def test_enabled_ai_trigger_creates_saved_mock_recommendation(client):
+def test_task_events_do_not_generate_mock_advice_or_call_provider(client):
     login(client)
     client.patch('/api/v1/projects/1/ai/settings', json={'enabled': True, 'triggers': {'blocker_created': True}})
     client.post('/api/v1/projects/1/incidents', json={'level': 'yellow', 'title': 'Новый блокер'})
     rows = client.get('/api/v1/projects/1/ai/recommendations').json()
-    assert len(rows) == 1
-    assert rows[0]['trigger'] == 'blocker_created'
-    assert rows[0]['request_context']['snapshot']['active_incidents'][0]['title'] == 'Новый блокер'
+    assert rows == []

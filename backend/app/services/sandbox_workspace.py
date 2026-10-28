@@ -14,7 +14,8 @@ from app.config import settings
 from app.db.models import (Project, ProjectState, Task, BoardColumn, Module, TaskAssignee,
     TaskDependency, ChecklistItem, TaskTimer, TimerSegment, Incident, IncidentTarget, IncidentEvent,
     Document, DocumentLock, AuditEntry, AuditRevision, Notification, AiSettings, AiRecommendation,
-    TelegramDelivery, CompletionVote, SandboxRun, User, TaskPlacement, PlanningLane, PlanningBaseline, PlanningState)
+    TelegramDelivery, CompletionVote, SandboxRun, User, TaskPlacement, PlanningLane, PlanningBaseline, PlanningState,
+    AdvisorJob)
 from app.services.audit import write_audit
 from app.services.board import create_default_columns
 
@@ -91,7 +92,7 @@ def reset_workspace(db: Session, project_id: int, actor_id: int) -> Path:
             (AuditRevision, AuditRevision.audit_entry_id.in_(audit_ids))]:
             db.query(model).filter(condition).delete(synchronize_session=False)
         db.query(Task).filter(Task.project_id == project_id).update({Task.parent_id: None}, synchronize_session=False)
-        for model in [PlanningBaseline, PlanningLane, Task, Incident, Document, Notification, TelegramDelivery, AiRecommendation,
+        for model in [AdvisorJob, PlanningBaseline, PlanningLane, Task, Incident, Document, Notification, TelegramDelivery, AiRecommendation,
                       AiSettings, CompletionVote, AuditEntry, Module, BoardColumn]:
             db.query(model).filter(model.project_id == project_id).delete(synchronize_session=False)
         db.query(SandboxRun).delete(synchronize_session=False)

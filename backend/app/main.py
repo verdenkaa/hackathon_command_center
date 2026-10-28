@@ -69,10 +69,27 @@ async def lifespan(app: FastAPI):
     stop = threading.Event()
     thread = threading.Thread(target=_scheduler_loop, args=(stop,), daemon=True)
     thread.start()
+    advisor_thread = threading.Thread(target=_advisor_loop, args=(stop,), daemon=True)
+    advisor_thread.start()
     try:
         yield
     finally:
         stop.set()
+        thread.join(timeout=5)
+        advisor_thread.join(timeout=100)
+
+
+def _advisor_loop(stop) -> None:
+    from app.services import advisor
+    while not stop.is_set():
+        try:
+            with SessionLocal() as db:
+                advisor.schedule(db)
+            worked = advisor.work_once(SessionLocal)
+        except Exception:
+            # No raw provider/credential exceptions in logs. Leases recover interrupted jobs.
+            worked = False
+        stop.wait(1 if worked else 5)
 
 
 def _scheduler_loop(stop) -> None:
@@ -84,6 +101,8 @@ def _scheduler_loop(stop) -> None:
     last_backup = time.time()  # первый автоматический бэкап — через 15 минут, не сразу
     while not stop.is_set():
         stop.wait(60)
+        if stop.is_set():
+            break
         try:
             db = SessionLocal()
             try:

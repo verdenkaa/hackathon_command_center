@@ -197,12 +197,21 @@ def check_ai(c: CheckContext) -> str:
     c.request('PATCH','/projects/1/ai/settings',{'enabled':True,'prompt':'Sandbox prompt','triggers':{'overdue':False}})
     preview = c.request('POST','/projects/1/ai/preview',{'question':'What is blocked?'})
     assert preview['mode']=='mock' and preview['prompt']=='Sandbox prompt'
-    rec = c.request('POST','/projects/1/ai/run',{'question':'What is blocked?'})
+    # Exercise legacy history only inside this disposable DB; no credential or provider use.
+    from app.services.ai import run_recommendation
+    engine = create_engine(f'sqlite:///{c.database.as_posix()}')
+    with Session(engine) as db:
+        row = run_recommendation(db, 1, 'manual', 'What is blocked?')
+        db.commit()
+        rec = {'id': row.id, 'request_context': row.request_context}
+    engine.dispose()
+    rec['request_context']['snapshot']['analytics_summary'].pop('generated_at', None)
+    preview['snapshot']['analytics_summary'].pop('generated_at', None)
     assert rec['request_context']==preview, 'Сохранённый контекст отличается от запроса'
     c.request('POST',f"/projects/1/ai/recommendations/{rec['id']}/exclude")
     preview = c.request('GET','/projects/1/ai/preview')
     assert preview['snapshot']['previous_recommendations']==[], 'Исключённая рекомендация осталась в контексте'
-    c.request('POST','/projects/1/ai/run',{'trigger':'overdue'},status=409)
+    c.request('POST','/projects/1/ai/run',{'trigger':'overdue'},status=422)
     messages = c.request('GET','/admin/sandbox/telegram?project_id=1')
     assert any(m['event_type']=='ai_recommendation' and m['mode']=='mock' for m in messages)
     c.login('member')

@@ -144,6 +144,8 @@ export interface AiSettings {
   prompt: string
   interval_minutes: number
   triggers: Record<string, boolean>
+  auto_enabled: boolean
+  next_run_at: string | null
 }
 
 export interface Recommendation {
@@ -155,7 +157,21 @@ export interface Recommendation {
   request_context: AiPreview | null
   excluded: boolean
   created_at: string
+  structured: Advice | null
+  status: string
+  status_by: number | null
+  status_at: string | null
+  comment: string
+  snapshot_at: string | null
+  snapshot_version: string | null
+  last_seen_at: string | null
 }
+
+export interface RelatedObjects { task_ids:number[];track_ids:number[];user_ids:number[];incident_ids:number[] }
+export interface Advice {title:string;situation:string;grounds:string[];consequence:string;action:string;limitations:string[];related:RelatedObjects;significance:string;freshness:string}
+export interface AdvisorJob {id:number;kind:string;trigger:string;state:string;question:string;answer:{answer?:string;grounds?:string[];limitations?:string[];related?:RelatedObjects;result?:string}|null;error_code:string|null;attempts:number;created_at:string;snapshot_at:string|null;snapshot_version:string|null;next_attempt_at:string}
+export interface AdvisorQuota {day_remaining:number;day_limit:number;reset_at:string;reset_seconds:number;minute_used:number;minute_limit:number;minute_tokens:number;token_limit:number;queued:number;key_saved:boolean;vault_available:boolean}
+export interface ProviderSettings {model:string;rpm:number;rpd:number;tpm:number;max_attempts:number;max_input_tokens:number;key_saved:boolean;vault_available:boolean}
 
 export interface AiPreview {
   mode: 'mock'
@@ -417,6 +433,13 @@ export const api = {
     request(`/api/v1/incidents/${id}/events`, { method: 'POST', body: JSON.stringify({ text }) }),
 
   aiSettings: (): Promise<AiSettings> => request(`/api/v1/projects/${pid()}/ai/settings`),
+  advisorQuota: (): Promise<AdvisorQuota> => request(`/api/v1/projects/${pid()}/ai/quota`),
+  advisorJobs: (): Promise<AdvisorJob[]> => request(`/api/v1/projects/${pid()}/ai/requests`),
+  askAdvisor: (kind:'question'|'analysis', question=''):Promise<AdvisorJob> => request(`/api/v1/projects/${pid()}/ai/requests`,{method:'POST',body:JSON.stringify({kind,question})}),
+  decideAdvice: (id:number,status:string,comment:string) => request(`/api/v1/projects/${pid()}/ai/recommendations/${id}`,{method:'PATCH',body:JSON.stringify({status,comment})}),
+  providerSettings: ():Promise<ProviderSettings> => request('/api/v1/ai/provider'),
+  patchProvider: (payload:Partial<ProviderSettings>) => request('/api/v1/ai/provider',{method:'PATCH',body:JSON.stringify(payload)}),
+  deleteAdvisorKey: () => request('/api/v1/ai/provider/key',{method:'DELETE'}),
   patchAiSettings: (payload: Record<string, unknown>) =>
     request(`/api/v1/projects/${pid()}/ai/settings`, { method: 'PATCH', body: JSON.stringify(payload) }),
   previewAi: (question = '', trigger = 'manual'): Promise<AiPreview> => request(`/api/v1/projects/${pid()}/ai/preview`, { method: 'POST', body: JSON.stringify({trigger, question}) }),
