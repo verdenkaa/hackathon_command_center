@@ -3,6 +3,7 @@ import { api, AiSettings, Me, currentProject } from './api'
 import { Badge, Field, fmtDate, useLoad, Modal, toMoscowInput, fromMoscowInput } from './ui'
 import { AdvisorProviderSettings } from './Advisor'
 import { Sandbox } from './Sandbox'
+import { TelegramSettings } from './TelegramSettings'
 
 export function Settings({ me, onProjectsChanged, onOpenProject }: {
   me: Me; onProjectsChanged: () => void
@@ -13,7 +14,7 @@ export function Settings({ me, onProjectsChanged, onOpenProject }: {
   const [msg, setMsg] = useState('')
 
   return (
-    <><div style={{ maxWidth: 720 }}>
+    <><div className="settings-page" style={{ maxWidth: 720 }}>
       <h3 style={{ margin: '4px 0 12px' }}>Настройки</h3>
       {msg && <div className="card" style={{ marginBottom: 12, borderColor: 'var(--ok)' }}>{msg}</div>}
 
@@ -22,6 +23,7 @@ export function Settings({ me, onProjectsChanged, onOpenProject }: {
       <ModulesSection setMsg={setMsg} />
       <CompletionSection isCaptain={isCaptain} setMsg={setMsg} />
       <AiSection isCaptain={isCaptain} setMsg={setMsg} />
+      {isCaptain && <TelegramSettings isAdmin={isAdmin}/>}
       {isAdmin && <AdvisorProviderSettings/>}
     </div>
     {isAdmin && <details className="card" style={{maxWidth:1100,marginTop:24}}>

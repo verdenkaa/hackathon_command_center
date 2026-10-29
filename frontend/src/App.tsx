@@ -33,6 +33,7 @@ export default function App() {
   const [navigation, setNavigation] = useState<{type:'task'|'incident';id:number;incident?:Incident}|null>(null)
   const [navigationKey, setNavigationKey] = useState(0)
   const [message, setMessage] = useState('')
+  const deepLinkOpened = useRef(false)
   useEffect(()=>{
     const close=(e:PointerEvent)=>{if(!notifRef.current?.contains(e.target as Node))setNotifOpen(false)}
     const escape=(e:KeyboardEvent)=>{if(e.key==='Escape')setNotifOpen(false)}
@@ -61,6 +62,23 @@ export default function App() {
     if (!me) return
     reloadProjects()
   }, [me, reloadProjects])
+
+  useEffect(()=>{
+    if(!me||!projectsLoaded||deepLinkOpened.current)return
+    deepLinkOpened.current=true
+    const params=new URLSearchParams(window.location.search)
+    const project=Number(params.get('project'))
+    const task=Number(params.get('task'))
+    const incident=Number(params.get('incident'))
+    if(!project)return
+    if(!projects.some(p=>p.id===project)){setMessage('Нет доступа к проекту из ссылки');return}
+    setCurrentProject(project);setProjectId(project)
+    if(Number.isSafeInteger(task)&&task>0){
+      api.task(task).then(value=>{if(value.project_id!==project)throw new Error('Объект не принадлежит проекту');setNavigation({type:'task',id:task});setNavigationKey(v=>v+1);setTab('board')}).catch(e=>setMessage(e.message))
+    }else if(Number.isSafeInteger(incident)&&incident>0){
+      api.incident(incident).then(value=>{if(value.project_id!==project)throw new Error('Объект не принадлежит проекту');setNavigation({type:'incident',id:incident,incident:value});setNavigationKey(v=>v+1);setTab('incidents')}).catch(e=>setMessage(e.message))
+    }
+  },[me,projectsLoaded,projects])
 
   useEffect(() => {
     if (!me) return

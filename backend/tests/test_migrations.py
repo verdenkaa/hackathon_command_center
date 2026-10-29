@@ -75,7 +75,7 @@ def test_upgrade_preserves_legacy_access_and_adds_mock_storage(tmp_path, monkeyp
     command.upgrade(cfg, '38bb310f4d87')
     engine = create_engine(url)
     with Session(engine) as db:
-        db.add(User(login='legacy', display_name='Legacy', password_hash='unused'))
+        db.execute(text("INSERT INTO users (login,display_name,password_hash,active,created_at) VALUES ('legacy','Legacy','unused',1,CURRENT_TIMESTAMP)"))
         # Insert using the old schema: the current ORM has new columns.
         db.execute(text("INSERT INTO projects (name,state,settings,created_at) VALUES ('A','preparation','{}',CURRENT_TIMESTAMP),('B','preparation','{}',CURRENT_TIMESTAMP)"))
         db.flush()

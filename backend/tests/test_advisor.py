@@ -11,11 +11,11 @@ from tests.conftest import TestingSessionLocal
 
 def test_reply_contract():
     from app.advisor_schemas import AnalysisReply
-    assert AnalysisReply.model_validate({'result': 'no_new_recommendations', 'recommendations': []})
+    assert AnalysisReply.model_validate({'captain_intervention': 'not_required', 'result': 'no_new_recommendations', 'recommendations': []})
     with pytest.raises(ValidationError):
-        AnalysisReply.model_validate({'result': 'recommendations', 'recommendations': []})
+        AnalysisReply.model_validate({'captain_intervention': 'required', 'result': 'recommendations', 'recommendations': []})
     with pytest.raises(ValidationError):
-        AnalysisReply.model_validate({'result': 'no_new_recommendations', 'recommendations': [], 'thoughts': 'private'})
+        AnalysisReply.model_validate({'captain_intervention': 'not_required', 'result': 'no_new_recommendations', 'recommendations': [], 'thoughts': 'private'})
 
 
 def test_pacific_reset_dst():
@@ -46,7 +46,7 @@ def test_questions_analysis_and_history(client, monkeypatch):
     assert result['state'] == 'succeeded' and result['answer']['answer']
     analysis = client.post('/api/v1/projects/1/ai/requests', json={'kind': 'analysis'}).json()
     svc.work_once(TestingSessionLocal, provider=lambda *_: svc.ProviderReply(
-        {'result': 'no_new_recommendations', 'recommendations': []}))
+        {'captain_intervention': 'not_required', 'result': 'no_new_recommendations', 'recommendations': []}))
     assert client.get(f"/api/v1/projects/1/ai/requests/{analysis['id']}").json()['state'] == 'succeeded'
     assert client.get('/api/v1/projects/1/ai/recommendations').json() == []
 
@@ -75,7 +75,7 @@ def test_invalid_ids_and_safe_errors(client, monkeypatch):
     svc = setup_advisor(client, monkeypatch)
     job = client.post('/api/v1/projects/1/ai/requests', json={'kind': 'analysis'}).json()
     svc.work_once(TestingSessionLocal, provider=lambda *_: svc.ProviderReply(
-        {'result': 'recommendations', 'recommendations': [recommendation([99999])]}))
+        {'captain_intervention': 'required', 'result': 'recommendations', 'recommendations': [recommendation([99999])]}))
     result = client.get(f"/api/v1/projects/1/ai/requests/{job['id']}").json()
     assert result['state'] == 'failed' and result['error_code'] == 'INVALID_RESPONSE'
     assert not client.get('/api/v1/projects/1/ai/recommendations').json()
@@ -83,7 +83,7 @@ def test_invalid_ids_and_safe_errors(client, monkeypatch):
 
 def test_dedup_status_and_exclusion(client, monkeypatch):
     svc = setup_advisor(client, monkeypatch)
-    provider = lambda *_: svc.ProviderReply({'result': 'recommendations', 'recommendations': [recommendation()]})
+    provider = lambda *_: svc.ProviderReply({'captain_intervention': 'required', 'result': 'recommendations', 'recommendations': [recommendation()]})
     for _ in range(2):
         client.post('/api/v1/projects/1/ai/requests', json={'kind': 'analysis'})
         svc.work_once(TestingSessionLocal, provider=provider)

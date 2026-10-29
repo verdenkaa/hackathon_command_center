@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 from pathlib import Path
+from threading import Event
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -25,6 +26,7 @@ from app.api import (
     planning,
     realtime,
     timers,
+    telegram,
 )
 from app.api.errors import register_error_handlers
 from app.config import settings
@@ -71,12 +73,25 @@ async def lifespan(app: FastAPI):
     thread.start()
     advisor_thread = threading.Thread(target=_advisor_loop, args=(stop,), daemon=True)
     advisor_thread.start()
+    telegram_thread = threading.Thread(target=_telegram_loop, args=(stop,), daemon=True)
+    telegram_thread.start()
     try:
         yield
     finally:
         stop.set()
         thread.join(timeout=5)
         advisor_thread.join(timeout=100)
+        telegram_thread.join(timeout=25)
+
+
+def _telegram_loop(stop: Event) -> None:
+    from app.services.telegram import work_once
+    while not stop.is_set():
+        try:
+            worked = work_once(SessionLocal)
+        except Exception:
+            worked = False
+        stop.wait(0.1 if worked else 3)
 
 
 def _advisor_loop(stop) -> None:
@@ -141,6 +156,7 @@ def create_app() -> FastAPI:
     app.include_router(notifications.router, prefix="/api/v1")
     app.include_router(documents.router, prefix="/api/v1")
     app.include_router(ai.router, prefix="/api/v1")
+    app.include_router(telegram.router, prefix="/api/v1")
     app.include_router(operations.router, prefix="/api/v1")
     app.include_router(sandbox.router, prefix="/api/v1")
     app.include_router(analytics.router, prefix="/api/v1")

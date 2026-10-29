@@ -30,9 +30,12 @@ class Advice(StrictModel):
     related: Related
     significance: Literal['info', 'warning', 'critical']
     freshness: Literal['current', 'uncertain']
+    action_user_ids: list[ObjectId] = Field(default_factory=list, max_length=100)
 
 
 class AnalysisReply(StrictModel):
+    captain_intervention: Literal['required', 'not_required']
+    summary: str = Field(default='', max_length=2000)
     result: Literal['recommendations', 'no_new_recommendations']
     recommendations: list[Advice] = Field(max_length=20)
 
@@ -40,6 +43,10 @@ class AnalysisReply(StrictModel):
     def consistent(self) -> 'AnalysisReply':
         if bool(self.recommendations) != (self.result == 'recommendations'):
             raise ValueError('Результат не соответствует списку рекомендаций')
+        if self.recommendations and self.captain_intervention != 'required':
+            raise ValueError('Рекомендации требуют вмешательства капитана')
+        if not self.recommendations and self.captain_intervention == 'required' and not self.summary:
+            raise ValueError('Опишите требующую вмешательства проблему в summary')
         return self
 
 

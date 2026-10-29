@@ -415,3 +415,17 @@ input[type="datetime-local"] { min-width: 180px; color-scheme: dark; }
 .advisor-controls { display: grid; gap: 8px; margin-top: 10px; }
 [id^="advisor-"] { scroll-margin-top: 90px; }
 @media(max-width: 600px) { .advisor-advice dl { grid-template-columns: minmax(0,1fr); gap: 4px; } .advisor-advice dd { margin-bottom: 8px; } .advisor-budget { flex-direction: column; } .advisor-panel .scan-heading { flex-wrap: wrap; } }
+/* Telegram routes and deletion previews remain readable on narrow screens. */
+.telegram-settings { overflow-wrap: anywhere; }
+.admin-panel .row { flex-wrap: wrap; }
+.settings-page { min-width: 0; }
+.settings-page .section { max-width: 100%; overflow-x: auto; }
+.telegram-routes { display: grid; gap: 10px; margin: 12px 0; }
+.telegram-route { display: grid; grid-template-columns: minmax(0, 1fr) 150px 90px; align-items: center; gap: 8px; }
+.telegram-route input, .telegram-route select { min-width: 0; width: 100%; }
+.telegram-delivery { border-top: 1px solid var(--border, #384050); padding: 12px 0; overflow-wrap: anywhere; }
+.telegram-delivery p { margin: 6px 0; }
+@media (max-width: 600px) {
+  .telegram-route { grid-template-columns: minmax(0, 1fr) 90px; }
+  .telegram-route > label { grid-column: 1 / -1; }
+}

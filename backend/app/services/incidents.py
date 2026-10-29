@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import update
 
 from app.api.errors import api_error
-from app.db.models import Incident, IncidentEvent, IncidentTarget, Project
+from app.db.models import Incident, IncidentEvent, IncidentTarget, Project, User
 from app.schemas import IncidentEventOut, IncidentOut, IncidentTargetOut
 from app.timeutil import utcnow
 
@@ -134,6 +134,9 @@ def serialize_incident(db: Session, incident: Incident) -> IncidentOut:
     if source_id is None:
         cascade.limitations.insert(0, 'Исходная задача не задана: расчёт от отмеченных задач.')
     return IncidentOut(
+        deleted_user_ids=[u.id for u in db.query(User).filter(User.deleted_identity.is_(True), User.id.in_(
+            {incident.author_id, incident.owner_id, *[e.actor_id for e in events],
+             *[t.target_id for t in targets if t.target_type == 'user']} - {None}))],
         source_task_id=source_id,
         cascade_depth=created.get('cascade_depth', 1),
         cascade=cascade,

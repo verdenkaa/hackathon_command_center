@@ -61,6 +61,8 @@ export function Incidents({ me, openIncidentId, initialIncident }: { me: Me; ope
   }, [reload])
 
   const names = new Map((participants ?? []).map((p) => [p.id, p.display_name]))
+  for(const incident of [...(incidents??[]),...(selected?[selected]:[])])
+    for(const id of incident.deleted_user_ids??[])names.set(id,'Удалённый пользователь')
   const taskNames = new Map((tasks ?? []).map((t) => [t.id, t.title]))
   const moduleNames = new Map((modules ?? []).map((m) => [m.id, m.name]))
   const name = (id: number | null) => (id == null ? '—' : names.get(id) ?? `#${id}`)
@@ -425,7 +427,7 @@ function IncidentPanel({
           {incident.events.map((ev) => (
             <div key={ev.id} style={{ fontSize: 13, borderLeft: '2px solid var(--border)', paddingLeft: 8 }}>
               <div className="row" style={{ flexWrap: 'wrap' }}>
-                <b>{{created:'Создал инцидент',confirmed:'Подтвердил эскалацию',rejected:'Отклонил эскалацию',resolved:'Закрыл инцидент',comment:'Добавил комментарий'}[ev.event_type] ?? 'Изменение инцидента'}</b>
+                <b>{{created:'Создал инцидент',confirmed:'Подтвердил эскалацию',rejected:'Отклонил эскалацию',resolved:'Закрыл инцидент',comment:'Добавил комментарий',owner_reassigned:'Передал ответственность после удаления аккаунта'}[ev.event_type] ?? 'Изменение инцидента'}</b>
                 {ev.actor_id != null && (
                   <span style={{ color: 'var(--accent)', fontSize: 12 }}>
                     {names.get(ev.actor_id) ?? `#${ev.actor_id}`}

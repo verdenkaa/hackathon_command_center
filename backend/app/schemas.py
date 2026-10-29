@@ -55,11 +55,23 @@ class UserCreate(BaseModel):
     display_name: str = Field(min_length=1, max_length=255)
     telegram_username: str | None = Field(default=None, max_length=128)
 
+    @field_validator('telegram_username')
+    @classmethod
+    def telegram_valid(cls, value: str | None) -> str | None:
+        from app.telegram_schemas import normalize_username
+        return normalize_username(value)
+
 
 class UserPatch(BaseModel):
     login: str | None = Field(default=None, min_length=1, max_length=128)
     display_name: str | None = Field(default=None, min_length=1, max_length=255)
     telegram_username: str | None = Field(default=None, max_length=128)
+
+    @field_validator('telegram_username')
+    @classmethod
+    def telegram_valid(cls, value: str | None) -> str | None:
+        from app.telegram_schemas import normalize_username
+        return normalize_username(value)
 
 
 class PasswordReset(BaseModel):
@@ -386,6 +398,7 @@ class IncidentEventOut(BaseModel):
 
 
 class IncidentOut(BaseModel):
+    deleted_user_ids: list[int] = Field(default_factory=list)
     source_task_id: int | None = None
     cascade_depth: int = 1
     cascade: 'CascadeOut | None' = None
@@ -503,6 +516,7 @@ class AiRunRequest(BaseModel):
 
 
 class AiRecommendationOut(BaseModel):
+    status_by_name: str | None = None
     model_config = ConfigDict(from_attributes=True)
 
     id: int

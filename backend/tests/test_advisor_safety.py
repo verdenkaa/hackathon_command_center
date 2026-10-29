@@ -57,7 +57,7 @@ def test_wrong_project_job_and_status_forbidden(client, monkeypatch):
     svc = setup_advisor(client, monkeypatch)
     job = client.post('/api/v1/projects/1/ai/requests', json={'kind': 'analysis'}).json()
     svc.work_once(TestingSessionLocal, provider=lambda *_: svc.ProviderReply(
-        {'result': 'recommendations', 'recommendations': [recommendation()]}))
+        {'captain_intervention': 'required', 'result': 'recommendations', 'recommendations': [recommendation()]}))
     rid = client.get('/api/v1/projects/1/ai/recommendations').json()[0]['id']
     other = client.post('/api/v1/projects', json={'name': 'Other'}).json()['id']
     assert client.get(f"/api/v1/projects/{other}/ai/requests/{job['id']}").status_code == 404
@@ -113,7 +113,7 @@ def test_sdk_config_and_response_filtering(client, monkeypatch):
             pass
         def generate_content(self, **kwargs):
             captures.update(kwargs)
-            return SimpleNamespace(text='{"result":"no_new_recommendations","recommendations":[]}',
+            return SimpleNamespace(text='{"captain_intervention":"not_required","result":"no_new_recommendations","recommendations":[]}',
                 usage_metadata=SimpleNamespace(prompt_token_count=15, candidates_token_count=8, thoughts_token_count=2))
     monkeypatch.setattr(genai, 'Client', FakeClient)
     monkeypatch.setattr(svc.vault, 'load', lambda: 'synthetic-sdk-key')

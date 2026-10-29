@@ -31,8 +31,23 @@ from app.schemas import (
 from app.security import hash_password
 from app.services.audit import write_audit
 from app.services.auth_service import revoke_all_sessions
+from app.telegram_schemas import DeleteAccount
 
 router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(require_admin)])
+
+
+@router.get('/users/{user_id}/deletion-preview')
+def deletion_preview(user_id: int, db: Session = Depends(get_db)) -> dict:
+    from app.services.account_deletion import preview
+    return preview(db, user_id)
+
+
+@router.delete('/users/{user_id}')
+def delete_user(user_id: int, body: DeleteAccount, db: Session = Depends(get_db),
+                admin: User = Depends(require_admin)) -> dict:
+    from app.services.account_deletion import erase
+    erase(db, user_id, body, admin.id)
+    return {'status': 'deleted'}
 
 
 def _now() -> datetime:
@@ -55,7 +70,7 @@ def active_admin_ids(db: Session) -> list[int]:
 
 @router.get("/users", response_model=list[UserOut])
 def list_users(db: Session = Depends(get_db)) -> list[UserOut]:
-    rows = db.query(User).order_by(User.id).all()
+    rows = db.query(User).filter(User.deleted_identity.is_(False)).order_by(User.id).all()
     return [UserOut.model_validate(u) for u in rows]
 
 
@@ -96,7 +111,7 @@ def create_user(body: UserCreate, db: Session = Depends(get_db), admin: User = D
 @router.patch("/users/{user_id}", response_model=UserOut)
 def patch_user(user_id: int, body: UserPatch, db: Session = Depends(get_db), admin: User = Depends(require_admin)) -> UserOut:
     user = db.get(User, user_id)
-    if user is None:
+    if user is None or user.deleted_identity:
         raise api_error(404, "NOT_FOUND", "Пользователь не найден")
     if body.login is not None and body.login != user.login:
         if db.query(User).filter(User.login == body.login).first():
@@ -108,7 +123,9 @@ def patch_user(user_id: int, body: UserPatch, db: Session = Depends(get_db), adm
         write_audit(db, action="user.name_changed", actor_id=admin.id, entity_type="user", entity_id=user.id,
                     data={"old": user.display_name, "new": body.display_name})
         user.display_name = body.display_name
-    if body.telegram_username is not None and body.telegram_username != user.telegram_username:
+    if 'telegram_username' in body.model_fields_set and body.telegram_username != user.telegram_username:
+        write_audit(db, action='user.telegram_changed', actor_id=admin.id, entity_type='user', entity_id=user.id,
+                    data={'configured': body.telegram_username is not None})
         user.telegram_username = body.telegram_username
     db.commit()
     db.refresh(user)
@@ -118,7 +135,7 @@ def patch_user(user_id: int, body: UserPatch, db: Session = Depends(get_db), adm
 @router.post("/users/{user_id}/password-reset", response_model=UserOut)
 def password_reset(user_id: int, body: PasswordReset, db: Session = Depends(get_db), admin: User = Depends(require_admin)) -> UserOut:
     user = db.get(User, user_id)
-    if user is None:
+    if user is None or user.deleted_identity:
         raise api_error(404, "NOT_FOUND", "Пользователь не найден")
     user.password_hash = hash_password(body.new_password)
     revoke_all_sessions(db, user.id)
@@ -131,7 +148,7 @@ def password_reset(user_id: int, body: PasswordReset, db: Session = Depends(get_
 @router.post("/users/{user_id}/deactivate", response_model=UserOut)
 def deactivate(user_id: int, db: Session = Depends(get_db), admin: User = Depends(require_admin)) -> UserOut:
     user = db.get(User, user_id)
-    if user is None:
+    if user is None or user.deleted_identity:
         raise api_error(404, "NOT_FOUND", "Пользователь не найден")
     if user.id in active_admin_ids(db) and len(set(active_admin_ids(db))) <= 1:
         raise api_error(409, "LAST_ADMIN", "Нельзя деактивировать последнего администратора")
@@ -151,7 +168,7 @@ def deactivate(user_id: int, db: Session = Depends(get_db), admin: User = Depend
 @router.post("/roles", response_model=RoleOut)
 def assign_role(body: RoleAssign, db: Session = Depends(get_db), admin: User = Depends(require_admin)) -> RoleOut:
     user = db.get(User, body.user_id)
-    if user is None:
+    if user is None or user.deleted_identity:
         raise api_error(404, "NOT_FOUND", "Пользователь не найден")
     project_id = None if body.role == Role.admin else body.project_id
     if body.role != Role.admin:

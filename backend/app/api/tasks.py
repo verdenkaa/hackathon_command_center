@@ -305,14 +305,15 @@ def set_assignees(
         if a.user_id not in project_member_ids(db, task.project_id):
             raise api_error(422, "VALIDATION_ERROR", f"Пользователь {a.user_id} не участник проекта")
 
+    previous_ids = {a.user_id for a in db.query(TaskAssignee).filter_by(task_id=task_id)}
     db.query(TaskAssignee).filter(TaskAssignee.task_id == task_id).delete()
     for a in body.assignees:
         db.add(TaskAssignee(task_id=task_id, user_id=a.user_id, is_primary=a.is_primary))
     task.version += 1
     write_audit(db, action="task.assignees_set", actor_id=user.id, project_id=task.project_id, entity_type="task", entity_id=task.id,
                 data={"user_ids": [a.user_id for a in body.assignees]})
-    if body.assignees:
-        assigned_ids = [a.user_id for a in body.assignees]
+    assigned_ids = [a.user_id for a in body.assignees if a.user_id not in previous_ids]
+    if assigned_ids:
         names = [db.get(User, uid).telegram_username for uid in assigned_ids]
         notify_users(
             db,

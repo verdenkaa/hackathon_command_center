@@ -48,7 +48,7 @@ def fake_provider(_cfg, kind, _system, content):
         return advisor.ProviderReply({'answer': 'План неполный. Уточните размещение задачи и доступность команды.',
             'grounds': ['У задачи нет размещения в плане'], 'limitations': ['Навыки и доступность не подтверждены'],
             'related': related}, 200, 80, 0)
-    return advisor.ProviderReply({'result': 'recommendations', 'recommendations': [{
+    return advisor.ProviderReply({'captain_intervention': 'required', 'result': 'recommendations', 'recommendations': [{
         'title': 'Уточните план демонстрации', 'situation': 'Есть незавершённая задача без размещения.',
         'grounds': ['Серверный план отмечает неполный охват'], 'consequence': 'Нельзя подтвердить срок завершения.',
         'action': 'Обсудите размещение задачи с командой.', 'limitations': ['Навыки и доступность людей неизвестны'],

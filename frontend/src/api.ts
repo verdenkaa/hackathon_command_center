@@ -98,6 +98,7 @@ export interface PlanningData {
 export interface IncidentSummary { id:number; number:number; title:string; level:string; status:string }
 
 export interface Incident {
+  deleted_user_ids?:number[]
   source_task_id?:number|null
   cascade_depth?:number
   cascade?:Cascade|null
@@ -149,6 +150,7 @@ export interface AiSettings {
 }
 
 export interface Recommendation {
+  status_by_name?:string|null
   id: number
   provider: string
   trigger: string
@@ -327,6 +329,7 @@ async function request<T>(path: string, init?: RequestInit, previewAttempt=0): P
       const body = await res.json()
       code = body?.error?.code ?? code
       message = body?.error?.message ?? message
+      if (code === 'VALIDATION_ERROR' && body?.error?.details?.errors?.[0]?.msg) message = body.error.details.errors[0].msg.replace(/^Value error, /,'')
       if(code==='PLANNING_PREVIEW' && previewAttempt<3) {
         const preview=body.error.details as Preview
         if(await approvePlan(preview)) return request<T>(path,{...init,headers:{'Content-Type':'application/json',...init?.headers,'X-Planning-Confirm':preview.token}},previewAttempt+1)
@@ -358,6 +361,14 @@ function pid() {
 }
 
 export const api = {
+  telegramSettings: ():Promise<TelegramSettingsData> => request(`/api/v1/projects/${pid()}/telegram`),
+  saveTelegram: (payload:{chat_id:string|null;routes:Record<string,number|null>;public_url:string;confirm_chat:boolean}):Promise<TelegramSettingsData> => request(`/api/v1/projects/${pid()}/telegram`,{method:'PUT',body:JSON.stringify(payload)}),
+  telegramDeliveries: ():Promise<Delivery[]> => request(`/api/v1/projects/${pid()}/telegram/deliveries`),
+  testTelegram: (chat:string,thread:number|null) => request(`/api/v1/projects/${pid()}/telegram/test`,{method:'POST',body:JSON.stringify({confirmed_chat_id:chat,thread_id:thread})}),
+  retryTelegram: (id:number,accept:boolean) => request(`/api/v1/projects/${pid()}/telegram/deliveries/${id}/retry`,{method:'POST',body:JSON.stringify({accept_duplicate_risk:accept})}),
+  deleteTelegramKey: () => request('/api/v1/telegram/bot/key',{method:'DELETE'}),
+  deletionPreview: (id:number):Promise<DeletionPreview> => request(`/api/v1/admin/users/${id}/deletion-preview`),
+  deleteUser: (id:number,body:{confirm:true;preview_version:string;incident_captains:Record<number,number>;task_primaries:Record<number,number>}) => request(`/api/v1/admin/users/${id}`,{method:'DELETE',body:JSON.stringify(body)}),
   planning: ():Promise<PlanningData> => request(`/api/v1/projects/${pid()}/planning`),
   planCommand: (revision:number,op:string,values:Record<string,unknown>={}):Promise<PlanningData> => request(`/api/v1/projects/${pid()}/planning`,{method:'POST',body:JSON.stringify({revision,op,...values})}),
   login: (login: string, password: string) =>
@@ -491,4 +502,18 @@ export const api = {
 
   completionVote: (action: 'complete' | 'reopen') =>
     request(`/api/v1/projects/${pid()}/completion-votes`, { method: 'POST', body: JSON.stringify({ action }) }),
+}
+
+export interface TelegramSettingsData {
+  project_id:number;bot_connected:boolean;chat_id:string|null;routes:Record<string,number|null>;public_url:string
+  events:Record<string,string>;missing_usernames:{id:number;name:string}[];pending:number;queue_policy:string
+}
+export interface Delivery {
+  id:number;event_type:string;chat_id:string;thread_id:number|null;state:string;attempts:number;error:string|null
+  created_at:string;attempted_at:string|null;sent_at:string|null;next_attempt_at:string;parts_sent:number
+}
+export interface DeletionPreview {
+  version:string;blocked:boolean;deletion_limits:string;links:Record<string,number>
+  tasks:{id:number;title:string;project:string;project_id:number;needs_primary:boolean;remaining:{id:number;name:string;is_primary:boolean}[]}[]
+  projects:{id:number;name:string;captains:{id:number;name:string}[];incidents:{id:number;number:number;title:string}[]}[]
 }

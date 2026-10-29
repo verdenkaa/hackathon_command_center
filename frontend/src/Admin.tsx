@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { api, UserInfo, currentProject } from './api'
 import { Badge, Field, Modal, fmtDate, useLoad } from './ui'
+import {EditTelegram,DeleteAccount} from './AccountActions'
 
 type Section = 'users' | 'logins' | 'ip' | 'backups'
 
@@ -8,7 +9,7 @@ export function Admin() {
   const [section, setSection] = useState<Section>('users')
 
   return (
-    <div>
+    <div className="admin-panel">
       <div className="row" style={{ margin: '4px 0 12px' }}>
         <h3 style={{ margin: 0 }}>Администрирование</h3>
         <span className="grow" />
@@ -30,6 +31,8 @@ function Users() {
   const [users, error, reload] = useLoad<UserInfo[]>(api.users)
   const [roles, , reloadRoles] = useLoad<{ id: number; user_id: number; role: string; project_id: number | null }[]>(api.roles)
   const [createOpen, setCreateOpen] = useState(false)
+  const [editTelegram,setEditTelegram]=useState<UserInfo|null>(null)
+  const [deleteAccount,setDeleteAccount]=useState<UserInfo|null>(null)
 
   const rolesOf = (id: number) => (roles ?? []).filter((r) => r.user_id === id && (r.role === 'admin' || r.project_id === currentProject()))
 
@@ -40,7 +43,7 @@ function Users() {
         <span className="muted">Аккаунты общие. Участник и капитан — роли выбранного проекта; администратор — общий.</span>
       </div>
       {error && <div className="error">{error}</div>}
-      <table>
+      <div style={{overflowX:'auto'}}><table>
         <thead>
           <tr>
             <th>ID</th><th>Логин</th><th>Имя</th><th>Telegram</th><th>Роли</th><th>Статус</th><th>Действия</th>
@@ -52,7 +55,7 @@ function Users() {
               <td>{u.id}</td>
               <td>{u.login}</td>
               <td>{u.display_name}</td>
-              <td>{u.telegram_username ?? '—'}</td>
+              <td><div>{u.telegram_username ? `@${u.telegram_username}` : 'не указан'}</div><button className="small" onClick={()=>setEditTelegram(u)}>изменить Telegram</button></td>
               <td>
                 <div className="row" style={{ flexWrap: 'wrap' }}>
                   {rolesOf(u.id).map((r) => (
@@ -79,6 +82,7 @@ function Users() {
               </td>
               <td>
                 <div className="row">
+                  {!u.active&&<button className="small danger" onClick={()=>setDeleteAccount(u)}>удалить аккаунт</button>}
                   {!rolesOf(u.id).some((r) => r.role === 'participant') && (
                     <button className="small" onClick={async () => { await api.assignRole(u.id, 'participant'); reloadRoles() }}>участник</button>
                   )}
@@ -120,7 +124,9 @@ function Users() {
             </tr>
           ))}
         </tbody>
-      </table>
+      </table></div>
+      {editTelegram&&<EditTelegram user={editTelegram} onClose={()=>setEditTelegram(null)} onSaved={()=>{setEditTelegram(null);reload()}}/>}
+      {deleteAccount&&<DeleteAccount user={deleteAccount} onClose={()=>setDeleteAccount(null)} onDeleted={()=>{setDeleteAccount(null);reload();reloadRoles()}}/>}
       {createOpen && (
         <CreateUser
           onClose={() => setCreateOpen(false)}

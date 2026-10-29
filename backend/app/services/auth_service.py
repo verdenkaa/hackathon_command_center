@@ -82,7 +82,7 @@ def authenticate(
         raise api_error(429, "RATE_LIMITED", "Слишком много неудачных попыток, попробуйте позже")
 
     user = db.query(User).filter(User.login == login).first()
-    if user is None or not verify_password(password, user.password_hash):
+    if user is None or user.deleted_identity or not verify_password(password, user.password_hash):
         record_login(db, login=login, ip=ip, user_id=None, success=False, reason="bad_credentials")
         raise api_error(401, "BAD_CREDENTIALS", "Неверный логин или пароль")
 

@@ -44,6 +44,9 @@ def notify_users(
     for uid in set(user_ids):
         db.add(Notification(project_id=project_id, user_id=uid, type=ntype, payload=payload))
     db.flush()
+    if project_id is not None:
+        from app.services.telegram import event
+        event(db, project_id, ntype, payload, user_ids)
     if telegram_text:
         db.add(TelegramDelivery(project_id=project_id, event_type=ntype, text=telegram_text,
                                 mentions=mention_usernames or [], mode='mock'))

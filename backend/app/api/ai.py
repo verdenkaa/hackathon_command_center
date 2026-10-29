@@ -15,6 +15,11 @@ from app.services import ai as ai_svc
 router = APIRouter(tags=["ai"])
 
 
+def recommendation_out(db: Session, rec: AiRecommendation) -> AiRecommendationOut:
+    author = db.get(User, rec.status_by) if rec.status_by else None
+    return AiRecommendationOut.model_validate(rec).model_copy(update={'status_by_name': author.display_name if author else None})
+
+
 @router.get('/projects/{project_id}/ai/preview')
 @router.post('/projects/{project_id}/ai/preview')
 def preview(project_id: int, body: AiRunRequest | None = None, db: Session = Depends(get_db),
@@ -64,7 +69,7 @@ def list_recommendations(
         .limit(limit)
         .all()
     )
-    return [AiRecommendationOut.model_validate(r) for r in rows]
+    return [recommendation_out(db, r) for r in rows]
 
 
 @router.post("/projects/{project_id}/ai/run", response_model=JobOut, status_code=202)
@@ -93,7 +98,7 @@ def toggle_exclude(
     rec.excluded = not rec.excluded
     db.commit()
     db.refresh(rec)
-    return AiRecommendationOut.model_validate(rec)
+    return recommendation_out(db, rec)
 
 
 @router.patch('/projects/{project_id}/ai/recommendations/{rec_id}', response_model=AiRecommendationOut)
@@ -105,7 +110,7 @@ def decision(project_id: int, rec_id: int, body: Decision, db: Session = Depends
         raise api_error(404, 'NOT_FOUND', 'Рекомендация не найдена')
     rec.status, rec.comment, rec.status_by, rec.status_at = body.status, body.comment, user.id, utcnow()
     db.commit()
-    return AiRecommendationOut.model_validate(rec)
+    return recommendation_out(db, rec)
 
 
 @router.post('/projects/{project_id}/ai/requests', response_model=JobOut, status_code=202)

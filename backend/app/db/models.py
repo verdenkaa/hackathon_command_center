@@ -88,6 +88,7 @@ class User(Base):
     display_name: Mapped[str] = mapped_column(String(255))
     telegram_username: Mapped[str | None] = mapped_column(String(128), nullable=True)
     active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    deleted_identity: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     avatar: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
@@ -487,7 +488,7 @@ class AdvisorAttempt(Base):
 
 
 class TelegramDelivery(Base):
-    """Persistent preview of messages; never sends to an external service."""
+    """Transactional outbox. Historical mock records remain preview-only."""
     __tablename__ = "telegram_deliveries"
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -496,7 +497,27 @@ class TelegramDelivery(Base):
     text: Mapped[str] = mapped_column(Text, nullable=False)
     mentions: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
     mode: Mapped[str] = mapped_column(String(16), default='mock', nullable=False)
+    chat_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    thread_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    state: Mapped[str] = mapped_column(String(16), default='preview', index=True)
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    next_attempt_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    attempted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    lease_token: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    lease_until: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    error_code: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    message_ids: Mapped[list[int]] = mapped_column(JSON, default=list)
+    event_key: Mapped[str | None] = mapped_column(String(100), unique=True, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class TelegramSettings(Base):
+    __tablename__ = 'telegram_settings'
+    project_id: Mapped[int] = mapped_column(ForeignKey('projects.id'), primary_key=True)
+    chat_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    routes: Mapped[dict] = mapped_column(JSON, default=dict)
+    public_url: Mapped[str] = mapped_column(String(500), default='')
 
 
 class CompletionVote(Base):

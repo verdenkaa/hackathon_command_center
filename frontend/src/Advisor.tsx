@@ -35,7 +35,7 @@ export function AdviceCard({rec:r,canManage,onChange,...links}:{rec:Recommendati
     {a&&<ObjectLinks related={a.related} {...links}/>}
     {r.snapshot_at&&<p className="muted" title={`Версия: ${r.snapshot_version}`}>Снимок: {fmtDate(r.snapshot_at)}</p>}
     {(stale||a?.freshness==='uncertain')&&<p className="advisor-warning">Данные могли устареть или имеют неполный охват. Проверьте текущее состояние.</p>}
-    {r.comment&&<p>Решение команды: {r.comment}{r.status_by?` · участник #${r.status_by}`:''}{r.status_at?` · ${fmtDate(r.status_at)}`:''}</p>}
+    {r.comment&&<p>Решение команды: {r.comment}{r.status_by?` · ${r.status_by_name??`участник #${r.status_by}`}`:''}{r.status_at?` · ${fmtDate(r.status_at)}`:''}</p>}
     {r.status==='accepted'&&<p className="muted">Принятие совета не означает, что действие выполнено.</p>}
     <p className="muted">{r.excluded?'Исключена из контекста':'Учитывается при следующем анализе'}</p>
     {canManage&&<details><summary>Изменить решение</summary><div className="advisor-controls">

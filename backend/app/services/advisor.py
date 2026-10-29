@@ -199,13 +199,12 @@ def schedule(db: Session) -> None:
     rows = db.query(AiSettings).join(Project, Project.id == AiSettings.project_id).filter(
         AiSettings.enabled.is_(True), AiSettings.auto_enabled.is_(True), Project.state == ProjectState.active,
         (Project.start_msk.is_(None) | (Project.start_msk <= now))).all()
-    ready = vault.available() and vault.is_saved()
     for settings in rows:
         if settings.next_run_at is not None and settings.next_run_at > now:
             continue
         pending = db.query(AdvisorJob).filter_by(project_id=settings.project_id, trigger='automatic').filter(
             AdvisorJob.state.in_(PENDING)).first()
-        if ready and not pending:
+        if not pending:
             db.add(AdvisorJob(project_id=settings.project_id, kind='analysis', trigger='automatic', priority=2))
         settings.next_run_at = now + timedelta(minutes=settings.interval_minutes)
     db.commit()
@@ -295,6 +294,10 @@ def _save_result(db: Session, job: AdvisorJob, data: dict[str, Any]) -> None:
     result = AnalysisReply.model_validate(data)
     for item in result.recommendations:
         _validate_ids(item.related, job.snapshot)
+        _validate_ids(Related(user_ids=item.action_user_ids), job.snapshot)
+        from app.deps import project_member_ids
+        if set(item.action_user_ids) - set(project_member_ids(db, job.project_id)):
+            raise ProviderError('INVALID_RESPONSE')
         if warning:
             item.freshness = 'uncertain'
             item.limitations.append(warning)
@@ -319,7 +322,10 @@ def _save_result(db: Session, job: AdvisorJob, data: dict[str, Any]) -> None:
         from app.services.notifications import notify_users, team
         notify_users(db, project_id=job.project_id, user_ids=team(db, job.project_id),
                      ntype='ai_recommendation', payload={'recommendation_id': rec.id, 'title': rec.summary})
-    job.answer = {'result': 'recommendations' if created else 'no_new_recommendations', 'recommendation_ids': ids}
+    job.answer = {'result': 'recommendations' if created else 'no_new_recommendations',
+                  'captain_intervention': result.captain_intervention, 'recommendation_ids': ids}
+    from app.services.telegram import report
+    report(db, job, result.model_dump())
 
 
 def work_once(factory: sessionmaker[Session], provider: Callable[..., ProviderReply] = gemini) -> bool:
@@ -327,8 +333,10 @@ def work_once(factory: sessionmaker[Session], provider: Callable[..., ProviderRe
     with factory() as db:
         cfg = lock(db)
         # An expired lease has an uncertain provider outcome: keep its attempt charged and fail safely.
-        db.query(AdvisorJob).filter(AdvisorJob.state == 'running', AdvisorJob.lease_until < now).update(
-            {'state': 'failed', 'error_code': 'INTERRUPTED', 'finished_at': now})
+        from app.services.telegram import report
+        for expired in db.query(AdvisorJob).filter(AdvisorJob.state == 'running', AdvisorJob.lease_until < now):
+            expired.state, expired.error_code, expired.finished_at = 'failed', 'INTERRUPTED', now
+            report(db, expired)
         job = db.query(AdvisorJob).filter(AdvisorJob.state.in_(('queued', 'waiting')),
             AdvisorJob.next_attempt_at <= now).order_by(AdvisorJob.priority, AdvisorJob.id).first()
         if job is None:
@@ -342,16 +350,19 @@ def work_once(factory: sessionmaker[Session], provider: Callable[..., ProviderRe
             user = db.get(User, job.user_id)
             if user is None or not user.active or not project_roles(db, job.user_id, job.project_id).intersection({Role.admin, Role.captain}):
                 job.state, job.error_code, job.finished_at = 'cancelled', 'ACCESS_REVOKED', now
+                report(db, job)
                 db.commit()
                 return True
         if (not settings.enabled or project.state == ProjectState.completed or
             (job.trigger == 'automatic' and (not settings.auto_enabled or project.state != ProjectState.active
              or (project.start_msk is not None and project.start_msk > now)))):
             job.state, job.error_code, job.finished_at = 'cancelled', 'AI_DISABLED', now
+            report(db, job)
             db.commit()
             return True
         if not vault.is_saved():
             job.state, job.error_code, job.finished_at = 'failed', 'KEY_MISSING', now
+            report(db, job)
             db.commit()
             return True
         # The write lock makes all snapshot reads observe one coherent database state.
@@ -371,6 +382,7 @@ def work_once(factory: sessionmaker[Session], provider: Callable[..., ProviderRe
                     pass  # Reserve will postpone until the current minute clears.
         except ContextTooLarge:
             job.state, job.error_code, job.finished_at = 'failed', 'CONTEXT_TOO_LARGE', now
+            report(db, job)
             db.commit()
             return True
         job.state, job.lease_until, job.lease_token = 'running', now + timedelta(minutes=5), uuid4().hex
@@ -381,6 +393,8 @@ def work_once(factory: sessionmaker[Session], provider: Callable[..., ProviderRe
         if reason:
             job.state = 'failed' if reason == 'CONTEXT_TOO_LARGE' else 'waiting'
             job.error_code, job.next_attempt_at = reason, next_at
+            if job.state == 'failed':
+                report(db, job)
             db.commit()
             return True
         job.attempts += 1
@@ -424,5 +438,7 @@ def work_once(factory: sessionmaker[Session], provider: Callable[..., ProviderRe
             attempt.outcome = 'succeeded'
             job.state, job.finished_at, job.error_code = 'succeeded', utcnow(), None
         job.lease_until = None
+        if job.state == 'failed':
+            report(db, job)
         db.commit()
     return True

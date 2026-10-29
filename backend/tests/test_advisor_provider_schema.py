@@ -28,4 +28,4 @@ def test_server_still_rejects_empty_evidence_and_too_many_recommendations():
     with pytest.raises(ValidationError):
         QuestionReply.model_validate({'answer': 'Answer', 'grounds': [], 'limitations': ['Unknown'], 'related': {}})
     with pytest.raises(ValidationError):
-        AnalysisReply.model_validate({'result': 'recommendations', 'recommendations': [{}] * 21})
+        AnalysisReply.model_validate({'captain_intervention': 'required', 'result': 'recommendations', 'recommendations': [{}] * 21})

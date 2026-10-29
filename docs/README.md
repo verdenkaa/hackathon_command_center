@@ -1,6 +1,7 @@
 # Документация Hackathon Command Center
 
 Планирование, правила пересчёта, API и проверка: [14-planning.md](14-planning.md).
+Telegram, защищённый токен, очередь и полное удаление аккаунтов: [16-telegram-and-accounts.md](16-telegram-and-accounts.md).
 
 Проект имеет два слоя документации, и их важно не смешивать:
 
