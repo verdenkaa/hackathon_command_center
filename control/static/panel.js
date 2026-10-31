@@ -75,9 +75,9 @@ function render(s) {
     closeKey();
   }
   const entry=s.installations?.items.find(row=>row.id===c.id);
-  text('installation', entry?.name || 'Новая платформа');
+  text('installation', entry?.name || 'Новый проект');
   text('account-login',c.login);
-  text('main-platform','Основная платформа запускается автоматически при включённом автозапуске. Переключение остановит текущую.');
+  text('main-platform','Основной проект запускается автоматически при включённом автозапуске. Переключение остановит текущую.');
   const select=$('platform-select'), options=(s.installations?.items||[]);
   const signature=JSON.stringify([options,s.installations?.main,c.id]);
   if(select.dataset.signature!==signature){
@@ -85,7 +85,7 @@ function render(s) {
     scenario(!options.length);
   }
   $('legacy-attach').hidden=c.configured;
-  $('select-platform').disabled=!!s.busy||!options.length;$('start-selected').disabled=!!s.busy||!options.length;
+  $('delete-project').disabled=!!s.busy||!options.length;$('select-platform').disabled=!!s.busy||!options.length;$('start-selected').disabled=!!s.busy||!options.length;
   $('show-key').disabled=!c.configured;
   $('scenario-existing').disabled=!!s.busy;
   $('scenario-new').disabled=!!s.busy;
@@ -152,7 +152,7 @@ async function refresh() { try { render(await api('status',undefined,'GET')); } 
 for(const button of document.querySelectorAll('[data-action]')) button.addEventListener('click', async()=>{ try { await api('action/'+button.dataset.action); message('Операция запущена. Состояние и результат появятся в панели.'); await refresh(); } catch(error) { message(error.message,true); } });
 $('setup-form').addEventListener('submit',async event=>{event.preventDefault();try{await api('setup',Object.fromEntries(new FormData(event.target)));message('Установка подготовлена. Сохраните ключ оператора, соберите образ и нажмите «Старт».');await refresh();}catch(error){message(error.message,true);}});
 $('unlock-form').addEventListener('submit',async event=>{event.preventDefault();try{await api('unlock',Object.fromEntries(new FormData(event.target)));event.target.reset();await refresh();}catch(error){message(error.message,true);}});
-$('settings-form').addEventListener('submit',async event=>{event.preventDefault();const data=Object.fromEntries(new FormData(event.target));for(const key of ['telegram_thread','telegram_alert_thread'])data[key]=data[key]?Number(data[key]):null;try{const result=await api('settings',data);event.target.elements.telegram.value='';event.target.elements.gemini.value='';message(result.message);await refresh();}catch(error){message(error.message,true);}});
+$('settings-form').addEventListener('submit',async event=>{event.preventDefault();const data=Object.fromEntries(new FormData(event.target));for(const key of ['telegram_thread','telegram_alert_thread'])data[key]=data[key]?Number(data[key]):null;try{data.clear_keys=['telegram','gemini'].filter(name=>data['clear_'+name]==='on');delete data.clear_telegram;delete data.clear_gemini;const result=await api('settings',data);event.target.elements.telegram.value='';event.target.elements.gemini.value='';event.target.elements.clear_telegram.checked=false;event.target.elements.clear_gemini.checked=false;message(result.message);await refresh();}catch(error){message(error.message,true);}});
 $('show-key').addEventListener('click',async()=>{
   try{
     const data=await api('operator');
@@ -181,7 +181,7 @@ $('activate').addEventListener('click',async()=>{try{await api('transfer/activat
 $('check-dependencies').addEventListener('click',async()=>{try{message('Проверяем компоненты…');await api('dependencies/check');await refresh();}catch(error){message(error.message,true);}});
 $('install-dependencies').addEventListener('click',async()=>{try{await api('dependencies/install');message('Шаг установки запущен. Прогресс и необходимые действия появятся в панели.');}catch(error){message(error.message,true);}});
 $('autostart-toggle').addEventListener('click',async()=>{try{await api('autostart',{enabled:!state.autostart});await refresh();}catch(error){message(error.message,true);}});
-$('tunnel-form').addEventListener('submit',async event=>{event.preventDefault();try{await api('tunnel/settings',Object.fromEntries(new FormData(event.target)));event.target.elements.fxtunnel.value='';message('Секрет и имя сохранены. Откройте туннель отдельной кнопкой.');}catch(error){message(error.message,true);}});
+$('tunnel-form').addEventListener('submit',async event=>{event.preventDefault();try{const data=Object.fromEntries(new FormData(event.target));data.clear_key=data.clear_key==='on';await api('tunnel/settings',data);event.target.elements.fxtunnel.value='';event.target.elements.clear_key.checked=false;message('Секрет и имя сохранены. Откройте туннель отдельной кнопкой.');}catch(error){message(error.message,true);}});
 $('copy-link').addEventListener('click',()=>{if(state?.tunnel?.url) navigator.clipboard.writeText(state.tunnel.url).then(()=>message('Действующая ссылка скопирована'));});
 $('new-platform-form').addEventListener('submit',async event=>{
   event.preventDefault();const button=event.target.querySelector('button.primary');button.disabled=true;
@@ -208,3 +208,22 @@ document.addEventListener('click',event=>{
   if(link.target==='_blank'&&window.pywebview?.api){event.preventDefault();window.pywebview.api.open_external(link.href.replace(/\/$/,''));}
 });
 (async()=>{const token=new URLSearchParams(location.hash.slice(1)).get('token');if(token){history.replaceState(null,'',location.pathname);try{await api('session',{token});}catch(error){message(error.message,true);return;}}await refresh();setInterval(refresh,5000);})();
+
+$('split-projects').addEventListener('click',async()=>{if(!confirm('Остановить платформу и создать отдельные копии проектов? Исходная база сохранится.'))return;try{await api('platforms/split',{});await refresh();message('Проекты разделены. Выберите проект, задайте ключи и запустите Aion.');}catch(error){message(error.message,true);}});
+
+let deleteTarget;
+$('delete-project').addEventListener('click',()=>{
+  deleteTarget=state?.installations?.items.find(row=>row.id===$('platform-select').value);
+  if(!deleteTarget)return;
+  text('delete-description',`Проект: ${deleteTarget.name}. Папка данных: ${deleteTarget.data_dir||'не указана'}. Работающий проект будет остановлен.`);
+  text('delete-error','');$('delete-data').checked=false;$('delete-confirmation').value='';$('confirm-delete-project').disabled=true;
+  $('delete-dialog').showModal();
+});
+$('delete-confirmation').addEventListener('input',()=>{$('confirm-delete-project').disabled=$('delete-confirmation').value!==deleteTarget?.name;});
+$('cancel-delete-project').addEventListener('click',()=>{$('delete-dialog').close();deleteTarget=null;});
+$('confirm-delete-project').addEventListener('click',async()=>{
+  if(!deleteTarget||$('delete-confirmation').value!==deleteTarget.name)return;
+  $('confirm-delete-project').disabled=true;
+  try{await api('platforms/delete',{identity:deleteTarget.id,confirmation:$('delete-confirmation').value,delete_data:$('delete-data').checked});$('delete-dialog').close();deleteTarget=null;restoreTicket=null;await refresh();message('Проект удалён из списка. Другой проект не запускался.');}
+  catch(error){text('delete-error',error.message);$('confirm-delete-project').disabled=false;}
+});

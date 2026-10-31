@@ -164,6 +164,8 @@ class Controller:
         probe.unlink()
         if shutil.disk_usage(data).free < 512 * 1024 * 1024:
             raise ArchiveError("Для первоначальной подготовки нужно хотя бы 512 МиБ свободного места")
+        if not (data / '.gitignore').exists():
+            atomic_write(data / '.gitignore', b'*\n')
         if not self.vault.get("operator"):
             self.vault.put("operator", secrets.token_urlsafe(36))
         if mode == "new":
@@ -194,6 +196,7 @@ class Controller:
             "ports": ["127.0.0.1:8000:8000"],
             "environment": {"APP_ENV": "production", "APP_MANAGED": "true", "APP_DATA_DIR": "/data",
                             "APP_INSTALLATION_ID": self.config["id"],
+                            "APP_PROJECT_NAME": self.config.get("name", "Aion"),
                             "DATABASE_URL": "sqlite:////data/hackathon.db", "APP_SECRETS_DIR": "/run/secrets",
                             "APP_FIRST_ADMIN_LOGIN": self.config["login"]},
             "volumes": [{"type": "bind", "source": self.docker.engine_path(Path(self.config["data_dir"])), "target": "/data"},
@@ -206,6 +209,23 @@ class Controller:
                             "interval": "20s", "timeout": "5s", "retries": 3, "start_period": "90s"},
         }}}
         atomic_write(self.folder / "compose.json", json.dumps(document).encode())
+
+    def discard_runtime(self) -> None:
+        """Remove only the four staged secret files owned by this installation."""
+        if not re.fullmatch(r'[a-f0-9]{1,32}', self.config['id']):
+            raise ArchiveError('Неверный идентификатор проекта')
+        names = ('operator', 'bootstrap_password', 'gemini', 'telegram')
+        if os.name == 'nt':
+            script = (f"from pathlib import Path; p=Path('/run/hcc-{self.config['id']}'); "
+                      f"[(p/n).unlink(missing_ok=True) for n in {names!r}]; "
+                      "p.rmdir() if p.exists() else None")
+            self.docker.run(['python3', '-c', script])
+        else:
+            runtime = self.folder / 'runtime'
+            for name in names:
+                (runtime / name).unlink(missing_ok=True)
+            if runtime.exists():
+                runtime.rmdir()
 
     def stage_secrets(self) -> None:
         self.write_compose()

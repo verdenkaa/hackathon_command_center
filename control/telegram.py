@@ -70,7 +70,7 @@ def send_alert(token: str, chat: str, thread: int | None, text: str, administrat
         content += f'<i>Было: {escape(old)}</i>\n<b>Сейчас: {escape(current)}</b>' if arrow else escape(detail)
     else:
         content = color + ' ' + escape(body)
-    formatted = mention + f'🔔 <b>{escape(title)}</b>\n'
+    formatted = '🐍 <b>Ouroboros Daemon</b>\n\n' + mention + f'🔔 <b>{escape(title)}</b>\n'
     if timestamp:
         formatted += f'<i>{escape(timestamp)}</i>\n'
     formatted += '\n' + content
@@ -86,7 +86,7 @@ def send_backup(token: str, chat: str, thread: int | None, blob: bytes, record: 
         raise DeliveryError("Архив больше лимита Telegram Bot API 50 МБ; сохранён локально. Используйте внешний диск.")
     boundary = "hcc" + secrets.token_hex(16)
     created = datetime.fromtimestamp(record['created'], timezone.utc).strftime('%d.%m.%Y %H:%M UTC')
-    caption = (f"🟢 <b>Резервная копия готова</b>\n<b>{escape(identity[:80])}</b>\n"
+    caption = (f"🐍 <b>Ouroboros Daemon</b>\n\n🟢 <b>Резервная копия готова</b>\n<b>{escape(identity[:80])}</b>\n"
                f"<i>Снимок: {created}</i>\n\n📦 {len(blob)/1024:.1f} КиБ · версия {escape(VERSION)}\n"
                "🔐 <b>Архив зашифрован</b>\n<i>Откройте файл в хабе. Ключ архива храните отдельно.</i>")
     fields = {"chat_id": chat, "disable_notification": "true", "caption": caption, 'parse_mode':'HTML'}

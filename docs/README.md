@@ -1,4 +1,6 @@
-# Документация Hackathon Command Center
+# Документация Aion
+
+Имена модулей: Aion — платформа, Ouroboros Daemon — управление и стабильность, Argus — ИИ, Hermes — Telegram, Agora — доска, Chronos — Гант.
 
 Переносимая поставка, локальная панель, ключи, копии и статус приёмки: [17-portable-operations.md](17-portable-operations.md). Для управляемого Docker-запуска этот документ уточняет прежние инструкции эксплуатации.
 

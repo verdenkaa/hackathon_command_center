@@ -15,7 +15,13 @@ from app.api.errors import api_error
 from threading import Lock
 from time import perf_counter
 
-router = APIRouter(prefix="/admin/sandbox", tags=["sandbox"], dependencies=[Depends(require_admin)])
+def require_development() -> None:
+    from app.config import settings
+    if settings.app_managed:
+        raise api_error(409, 'LOCAL_PANEL_REQUIRED', 'Для тестов создайте отдельный проект в Ouroboros Daemon')
+
+
+router = APIRouter(prefix="/admin/sandbox", tags=["sandbox"], dependencies=[Depends(require_admin), Depends(require_development)])
 _operation_lock = Lock()
 
 

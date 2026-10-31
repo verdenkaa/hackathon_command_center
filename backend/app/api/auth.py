@@ -48,4 +48,5 @@ def me(user=Depends(get_current_user), db: Session = Depends(get_db)) -> MeOut:
     roles = [RoleOut.model_validate(a) for a in active_roles(db, user.id)]
     out = MeOut.model_validate(user)
     out.roles = roles
+    out.managed = settings.app_managed
     return out

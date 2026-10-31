@@ -7,6 +7,7 @@ export interface Role {
 }
 
 export interface Me {
+  managed?: boolean
   id: number
   login: string
   display_name: string

@@ -39,6 +39,7 @@ class UnlockRequest(BaseModel):
 
 
 class SettingsRequest(BaseModel):
+    clear_keys: list[Literal['telegram', 'gemini']] = Field(default_factory=list)
     external_folder: str = Field(default="", max_length=2048)
     telegram_chat: str = Field(default="", pattern=r"^-?\d{1,24}$|^$")
     telegram_thread: int | None = Field(default=None, gt=0)
@@ -50,6 +51,7 @@ class SettingsRequest(BaseModel):
 
 
 class TunnelRequest(BaseModel):
+    clear_key: bool = False
     fxtunnel: str = Field(default="", max_length=4096)
     subdomain: str = Field(default="", pattern=r"^[a-z0-9-]{0,63}$")
 
@@ -77,6 +79,12 @@ class NewPlatformRequest(BaseModel):
 class SelectPlatformRequest(BaseModel):
     identity: str = Field(pattern=r'^[a-f0-9]{1,32}$')
     start: bool = True
+
+
+class DeletePlatformRequest(BaseModel):
+    identity: str = Field(pattern=r'^[a-f0-9]{1,32}$')
+    confirmation: str = Field(min_length=1, max_length=80)
+    delete_data: bool = False
 
 
 def create_app(root: Path, *, token: str, background: bool = True) -> FastAPI:
@@ -145,7 +153,7 @@ def create_app(root: Path, *, token: str, background: bool = True) -> FastAPI:
         return FileResponse(STATIC / name)
 
     @app.get('/static/icons/{name}')
-    def icon(name: Literal['docker.png','fxtunnel.png','gemini.png','telegram.png']):
+    def icon(name: Literal['docker.png','fxtunnel.png','gemini.png','telegram.png','hub.png','aion.png']):
         return FileResponse(STATIC / 'icons' / name)
 
     @app.post("/api/session")
@@ -176,6 +184,19 @@ def create_app(root: Path, *, token: str, background: bool = True) -> FastAPI:
     @app.post('/api/platforms/new')
     def new_platform(body: NewPlatformRequest):
         return {'identity': controller.create(body.folder, body.name, body.login)}
+
+    @app.post('/api/platforms/split')
+    def split_platform():
+        return {'identities': controller.split_projects()}
+
+    @app.post('/api/platforms/delete')
+    def delete_platform(body: DeletePlatformRequest):
+        try:
+            controller.delete(body.identity, body.confirmation, delete_data=body.delete_data)
+        except OSError:
+            raise ArchiveError('Удаление файлов не завершено. Проект оставлен в списке; проверьте права и доступность папок.') from None
+        pending.clear()
+        return {'status': 'ok'}
 
     @app.post('/api/platforms/select')
     def select_platform(body: SelectPlatformRequest):
@@ -241,7 +262,9 @@ def create_app(root: Path, *, token: str, background: bool = True) -> FastAPI:
                 raise ArchiveError("Выберите существующую отдельную папку внешних копий вне данных и панели")
         for name in ("telegram", "gemini"):
             value = getattr(body, name)
-            if value:
+            if name in body.clear_keys:
+                controller.vault.put(name, '')
+            elif value:
                 controller.vault.put(name, value)
         if (controller.config.get('telegram_chat'), controller.config.get('telegram_thread')) != (body.telegram_chat, body.telegram_thread):
             controller.history.update(telegram_id='', telegram_attempt=0, telegram_error=None)
@@ -257,7 +280,11 @@ def create_app(root: Path, *, token: str, background: bool = True) -> FastAPI:
 
     @app.post("/api/tunnel/settings")
     def tunnel_settings(body: TunnelRequest):
-        if body.fxtunnel:
+        if body.clear_key:
+            controller.tunnel.stop()
+            controller.config['tunnel_desired'] = False
+            controller.vault.put('fxtunnel', '')
+        elif body.fxtunnel:
             controller.vault.put("fxtunnel", body.fxtunnel)
         controller.config["subdomain"] = body.subdomain or 'dots-bots-hub'
         if controller.config['desired'] and controller.vault.get('fxtunnel'):

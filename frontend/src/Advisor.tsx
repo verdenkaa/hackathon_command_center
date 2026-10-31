@@ -67,7 +67,7 @@ export function Advisor({canManage,...links}:{canManage:boolean}&LinksProps) {
   }
   const lastAnalysis=(jobs??[]).find(j=>j.kind==='analysis')
   return <section className="card advisor-panel">
-    <div className="scan-heading"><h3>ИИ-советник</h3><Badge kind={settings?.enabled?'blue':'gray'}>{settings?.enabled?'Gemini':'Выключен'}</Badge></div>
+    <div className="scan-heading"><h3>Argus</h3><Badge kind={settings?.enabled?'blue':'gray'}>{settings?.enabled?'Gemini':'Выключен'}</Badge></div>
     {quota&&<div className={`advisor-budget ${quota.day_remaining<Math.max(10,quota.day_limit*.1)?'advisor-warning':''}`}>
       Примерный дневной остаток платформы: <strong>{quota.day_remaining} / {quota.day_limit}</strong>
       <span>До сброса: {Math.ceil(quota.reset_seconds/60)} мин · {fmtDate(quota.reset_at)} МСК</span>
@@ -76,7 +76,7 @@ export function Advisor({canManage,...links}:{canManage:boolean}&LinksProps) {
     </div>}
     {!settings?.enabled&&<p className="muted">ИИ выключен. Капитан или администратор может включить его в настройках.</p>}
     {quota&&!quota.vault_available&&<p role="alert">Защищённое хранилище Windows недоступно.</p>}
-    {quota&&!quota.key_saved&&<p className="advisor-warning">Ключ не задан. Администратору нужно запустить gemini-key.bat на компьютере сервера. Ввод ключа скрыт.</p>}
+    {quota&&!quota.key_saved&&<p className="advisor-warning">Argus: ключ Gemini задаётся, заменяется и удаляется в Ouroboros Daemon. После изменения перезапустите Aion.</p>}
     {quota?.day_remaining===0&&<p className="advisor-warning">Дневной бюджет исчерпан. Дождитесь сброса.</p>}
     {!canManage&&<p className="muted">Рекомендации доступны всей команде. Запросы и решения доступны капитану и администратору.</p>}
     {canManage&&<button className="primary" disabled={disabled} onClick={()=>run('analysis')}>{busy?'Отправка…':'Запросить рекомендации'}</button>}
@@ -101,9 +101,8 @@ export function AdvisorProviderSettings() {
   const [msg,setMsg]=useState('')
   if(!saved)return <p role={error?'alert':'status'}>{error||'Загрузка настроек Gemini…'}</p>
   async function save(){try{await api.patchProvider(draft);setDraft({});reload();setMsg('Настройки Gemini сохранены')}catch(e){setMsg((e as Error).message)}}
-  return <section className="card section"><h4>Gemini · общие настройки платформы</h4><p>{saved.key_saved?'Ключ сохранён':'Ключ не задан'} · {saved.vault_available?'Хранилище Windows доступно':'Хранилище недоступно'}</p>
-    <p className="muted">Для ввода или замены ключа запустите gemini-key.bat на компьютере сервера под учётной записью, запускающей платформу. Понадобится вход администратора; ключ вводится скрыто и хранится в Windows DPAPI.</p>
-    {saved.key_saved&&<button onClick={async()=>{try{await api.deleteAdvisorKey();reload()}catch(e){setMsg((e as Error).message)}}}>Удалить ключ</button>}
+  return <section className="card section"><h4>Argus · Gemini и лимиты</h4><p>{saved.key_saved?'Ключ сохранён':'Ключ не задан'} · {saved.vault_available?'Хранилище Windows доступно':'Хранилище недоступно'}</p>
+    <p className="muted">Argus: ключ Gemini задаётся, заменяется и удаляется в Ouroboros Daemon. После изменения перезапустите Aion.</p>
     <Field label="Модель"><input value={draft.model??saved.model} onChange={e=>setDraft({...draft,model:e.target.value})}/></Field>
     {(['rpm','rpd','tpm','max_attempts','max_input_tokens'] as const).map(key=><Field key={key} label={{rpm:'Запросов в минуту',rpd:'Запросов в день',tpm:'Входных токенов в минуту',max_attempts:'Максимум попыток',max_input_tokens:'Максимум входных токенов запроса'}[key]}><input type="number" min={1} value={draft[key]??saved[key]} onChange={e=>setDraft({...draft,[key]:Number(e.target.value)})}/></Field>)}
     <p className="muted">Проверьте значения в Google AI Studio. Порог 90% применяется к сумме входных токенов минутного окна.</p>

@@ -41,6 +41,7 @@ class UserOut(BaseModel):
 
 
 class MeOut(UserOut):
+    managed: bool = False
     roles: list[RoleOut] = Field(default_factory=list)
 
 

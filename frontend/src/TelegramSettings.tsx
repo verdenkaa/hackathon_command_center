@@ -30,17 +30,15 @@ export function TelegramSettings({isAdmin}:{isAdmin:boolean}) {
   }
   const dirty=!!saved&&(chat.trim()!==(saved.chat_id||'')||url!==saved.public_url||JSON.stringify(routes)!==JSON.stringify(saved.routes))
   return <section className="card section telegram-settings">
-    <div className="section-title">Telegram · проект #{project}</div>
+    <div className="section-title">Hermes · Telegram · проект #{project}</div>
     {error&&<p className="error" role="alert">{error}</p>}
     {message&&<p role="status">{message}</p>}
     {!saved?<p>Загрузка настроек…</p>:<>
       <div className="row"><Badge kind={saved.bot_connected?'green':'gray'}>Бот {saved.bot_connected?'подключён':'не подключён'}</Badge><Badge kind={saved.chat_id?'blue':'gray'}>{saved.chat_id?`Чат ${saved.chat_id}`:'Чат не выбран'}</Badge></div>
       {isAdmin&&<details style={{margin:'12px 0'}}><summary>Подключение одного бота платформы</summary>
-        <p>Создайте бота через @BotFather. На компьютере сервера запустите <code>telegram-key.bat</code>, войдите как администратор и введите токен скрытым вводом. Повторный запуск заменяет токен. Не вводите токен в чат или настройки проекта.</p>
+        <p>Hermes: токен бота задаётся, заменяется и удаляется в Ouroboros Daemon. После изменения перезапустите Aion.</p>
         <p className="muted">Защита Windows DPAPI под учётной записью сервера. Токен не включается в резервные копии платформы.</p>
-        <button className="small danger" disabled={busy||!saved.bot_connected} onClick={()=>{
-          if(confirm('Удалить токен общего бота? Отправка для всех проектов остановится. Очередь сохранится.'))act(async()=>{await api.deleteTelegramKey();setSaved({...saved,bot_connected:false})},'Токен удалён')
-        }}>Удалить токен бота</button>
+
         <button className="small" disabled={busy} onClick={()=>act(async()=>{setSaved(await api.telegramSettings())},'Состояние обновлено')}>Обновить состояние</button>
       </details>}
       <p className="muted">Добавьте бота в тестовый чат и разрешите отправку. Введите числовой ID чата и ID нужных тем вручную. Чат без тем: выберите «Общий чат». Автоматического списка всех тем Telegram нет.</p>

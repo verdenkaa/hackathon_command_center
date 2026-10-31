@@ -5,6 +5,10 @@
 .env
 **/.env*
 data
+aion-project-*
+**/node_modules
+**/backups
+**/archives
 **/__pycache__
 **/.pytest_cache
 frontend/node_modules

@@ -85,7 +85,7 @@ def run_desktop(root: Path, token: str, *, hidden: bool = False, resume: bool = 
             if (parsed.scheme == 'https' and parsed.hostname in {'fxtun.ru','docs.docker.com','learn.microsoft.com'}) or url == 'http://127.0.0.1:8000' or url == manager.tunnel.current_url:
                 webbrowser.open(url)
 
-    window = webview.create_window('Штаб · Менеджер платформ',
+    window = webview.create_window('Ouroboros Daemon',
         'http://127.0.0.1:8787/#token=' + token, js_api=Bridge(), width=1280, height=900,
         min_size=(900, 640), hidden=hidden, text_select=True)
 
@@ -107,7 +107,7 @@ def run_desktop(root: Path, token: str, *, hidden: bool = False, resume: bool = 
         lifecycle.finish()
     app.state.on_shutdown = finish_from_api
     image = Image.open(ICON_DIR / 'hub.png')
-    lifecycle.tray = pystray.Icon('hcc-manager', image, 'Штаб · Менеджер платформ', menu=pystray.Menu(
+    lifecycle.tray = pystray.Icon('hcc-manager', image, 'Ouroboros Daemon', menu=pystray.Menu(
         pystray.MenuItem('Открыть хаб', lambda *_: lifecycle.show(), default=True),
         pystray.MenuItem('Выключить хаб и платформу', lambda *_: threading.Thread(target=lifecycle.quit, daemon=True).start())))
     if os.name == 'nt':

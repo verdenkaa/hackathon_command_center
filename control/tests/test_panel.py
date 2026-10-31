@@ -38,6 +38,34 @@ def test_secret_is_not_returned_by_status(panel):
     assert response.headers["cache-control"] == "no-store"
 
 
+def test_project_delete_endpoint_requires_confirmation(panel, monkeypatch):
+    from unittest.mock import Mock
+    login(panel)
+    delete = Mock()
+    monkeypatch.setattr(type(panel.app.state.controller), 'delete', delete)
+    headers = {'Origin': 'http://127.0.0.1:8787'}
+    assert panel.post('/api/platforms/delete', json={'identity': 'abc123'}, headers=headers).status_code == 422
+    assert not delete.called
+    assert panel.post('/api/platforms/delete', json={'identity': 'abc123', 'confirmation': 'QA', 'delete_data': True}, headers=headers).status_code == 200
+    delete.assert_called_once_with('abc123', 'QA', delete_data=True)
+
+
+def test_keys_can_be_replaced_preserved_and_removed_only_locally(panel):
+    login(panel)
+    headers = {'Origin': 'http://127.0.0.1:8787'}
+    vault = panel.app.state.controller.vault
+    assert panel.post('/api/settings', json={'telegram': 'test-token', 'gemini': 'test-key'}, headers=headers).status_code == 200
+    assert vault.get('gemini') == 'test-key'
+    panel.post('/api/settings', json={}, headers=headers)
+    assert vault.get('telegram') == 'test-token'
+    panel.post('/api/settings', json={'clear_keys': ['telegram', 'gemini']}, headers=headers)
+    assert vault.get('telegram') == vault.get('gemini') == ''
+    panel.post('/api/tunnel/settings', json={'fxtunnel': 'test-tunnel'}, headers=headers)
+    assert vault.get('fxtunnel') == 'test-tunnel'
+    panel.post('/api/tunnel/settings', json={'clear_key': True}, headers=headers)
+    assert vault.get('fxtunnel') == ''
+
+
 def test_autostart_preserves_identity_before_setup(panel, monkeypatch):
     import json
     login(panel)

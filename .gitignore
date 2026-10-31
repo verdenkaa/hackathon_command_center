@@ -12,13 +12,23 @@ venv/
 backend/tests/.tmp/
 
 # Node / frontend
-frontend/node_modules/
+node_modules/
 frontend/dist/
 frontend/.vite/
 
 # Runtime data (kept outside git)
 data/
 .control/
+aion-project-*/
+backups/
+archives/
+*.hcc
+*.dpapi
+*.zip
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite3-wal
+*.sqlite3-shm
 
 # Secrets and local env
 .env

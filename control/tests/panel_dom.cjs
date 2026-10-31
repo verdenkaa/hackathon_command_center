@@ -45,3 +45,18 @@ test('credentials dialog separates verified login password and archive key',asyn
   f.$('close-key').click();assert.equal(f.$('account-password').value,'');
   f.close();
 });
+
+test('project deletion requires typed name and defaults to keeping files',async()=>{
+  const f=fixture();await settle();
+  f.$('delete-project').click();
+  assert.equal(f.$('delete-dialog').open,true);
+  assert.equal(f.$('delete-data').checked,false);
+  assert.equal(f.$('confirm-delete-project').disabled,true);
+  f.$('delete-confirmation').value='QA';
+  f.$('delete-confirmation').dispatchEvent(new f.w.Event('input'));
+  assert.equal(f.$('confirm-delete-project').disabled,false);
+  f.$('confirm-delete-project').click();await settle();
+  const call=f.calls.find(c=>c.url==='/api/platforms/delete');
+  assert.deepEqual(JSON.parse(call.options.body),{identity:'abc123',confirmation:'QA',delete_data:false});
+  f.close();
+});

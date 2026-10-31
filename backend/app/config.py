@@ -24,6 +24,7 @@ class Settings(BaseSettings):
     app_secrets_dir: str = ""
     app_static_dir: str = ""
     app_installation_id: str = ""
+    app_project_name: str = "Aion"
     app_data_dir: str = str(PROJECT_ROOT / "data")
     database_url: str = ""
 

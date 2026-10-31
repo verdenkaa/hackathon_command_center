@@ -60,6 +60,10 @@ def mentions(db: Session, ids: list[int]) -> tuple[list[str], list[str]]:
     return sorted(names), missing
 
 
+def sender_identity(event_type: str) -> str:
+    return '👁 Argus' if event_type.startswith('ai_') else '✉️ Hermes'
+
+
 def split_text(text: str) -> list[str]:
     # Limit UTF-16 units conservatively; preserve every character including newlines.
     parts: list[str] = []
@@ -219,6 +223,7 @@ def work_once(factory: sessionmaker[Session], sender: Callable[[str, int | None,
             if len(parts) > 1:
                 text = f'(часть {position + 1}/{len(parts)})\n' + text
         try:
+            text = sender_identity(row.event_type) + '\n\n' + text
             message_id = sender(chat, thread, text)
             error = None
         except TelegramError as exc:

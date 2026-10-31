@@ -26,7 +26,7 @@ export function Settings({ me, onProjectsChanged, onOpenProject }: {
       {isCaptain && <TelegramSettings isAdmin={isAdmin}/>}
       {isAdmin && <AdvisorProviderSettings/>}
     </div>
-    {isAdmin && <details className="card" style={{maxWidth:1100,marginTop:24}}>
+    {isAdmin && !me.managed && <details className="card" style={{maxWidth:1100,marginTop:24}}>
       <summary style={{cursor:'pointer',fontWeight:600}}>Песочница · тестирование и очистка</summary>
       <Sandbox onProjectsChanged={onProjectsChanged} onOpenProject={onOpenProject}/>
     </details>}</>
@@ -47,7 +47,6 @@ function ProjectSection({ isAdmin, isCaptain, setMsg, onProjectsChanged }: {
   const [periodError, setPeriodError] = useState('')
   useEffect(()=>{setStart(toMoscowInput(current?.start_msk ?? null))},[current?.start_msk])
   useEffect(()=>{setDeadline(toMoscowInput(current?.deadline_msk ?? null))},[current?.deadline_msk])
-  const [newName, setNewName] = useState('')
 
   useEffect(() => {
     if (current) setName(current.name)
@@ -105,26 +104,7 @@ function ProjectSection({ isAdmin, isCaptain, setMsg, onProjectsChanged }: {
         </button>
       </div>
       {periodError&&<p className="error" role="alert">{periodError}</p>}
-      {isAdmin && (
-        <div className="row" style={{ marginTop: 8 }}>
-          <Field label="Создать новый проект">
-            <input placeholder="Название проекта" value={newName} onChange={(e) => setNewName(e.target.value)} />
-          </Field>
-          <button
-            className="small primary"
-            disabled={!newName.trim()}
-            onClick={async () => {
-              await api.createProject(newName.trim())
-              setNewName('')
-              onProjectsChanged()
-              reloadProjects()
-              setMsg(`Проект «${newName.trim()}» создан. Выберите его в списке сверху.`)
-            }}
-          >
-            Создать
-          </button>
-        </div>
-      )}
+      <p className="muted">Проекты создаются и запускаются в Ouroboros Daemon.</p>
     </div>
   )
 }
@@ -379,7 +359,7 @@ function AiSection({ isCaptain, setMsg }: { isCaptain: boolean; setMsg: (s: stri
 
   return (
     <div className="card section">
-      <div className="section-title">ИИ-советник</div>
+      <div className="section-title">Argus · ИИ-наблюдатель</div>
       <p className="muted">Gemini анализирует снимок проекта и отвечает на вопросы. Советы не изменяют задачи автоматически.</p>
       <div className="row" style={{ marginBottom: 8 }}>
         <label className="row" style={{ cursor: 'pointer' }}>

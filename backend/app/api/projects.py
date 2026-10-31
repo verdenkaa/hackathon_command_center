@@ -58,6 +58,9 @@ def create_project(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> ProjectOut:
+    from app.config import settings
+    if settings.app_managed:
+        raise api_error(409, 'LOCAL_PANEL_REQUIRED', 'Создавайте проекты в Ouroboros Daemon')
     roles = {a.role for a in active_roles(db, user.id)}
     if Role.admin not in roles:
         raise api_error(403, "FORBIDDEN", "Создавать проекты может только администратор")

@@ -5,6 +5,8 @@ ICON_DIR = Path(__file__).parent / 'static' / 'icons'
 
 
 def build_icons() -> None:
+    if (ICON_DIR / 'hub.png').is_file() and (ICON_DIR / 'hub.ico').is_file():
+        return
     from PIL import Image, ImageDraw
     image = Image.new('RGBA', (256,256), (0,0,0,0))
     draw = ImageDraw.Draw(image)
