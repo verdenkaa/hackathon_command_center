@@ -4,6 +4,7 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from pathlib import Path
 from threading import Event
+from contextlib import nullcontext
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -57,7 +58,33 @@ def stamp_head() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    run_migrations()
+    from app.services.portable import preflight_migrations
+    if settings.app_managed:
+        from control.locking import FileLock
+        instance_lock = FileLock(settings.data_dir / ".server.lock", blocking=False)
+    else:
+        instance_lock = nullcontext()
+    with instance_lock:
+        def startup_state(phase: str) -> None:
+            if settings.app_managed:
+                import json
+                import time
+                from control.vault import atomic_write
+                atomic_write(settings.data_dir / ".startup-state.json", json.dumps({"phase": phase, "at": time.time()}).encode())
+        try:
+            startup_state("migrations")
+            preflight_migrations()
+            run_migrations()
+            async with _running_services(app):
+                startup_state("ready")
+                yield
+        except Exception:
+            startup_state("failed")
+            raise
+
+
+@asynccontextmanager
+async def _running_services(app: FastAPI):
     from app.services.bootstrap import bootstrap
 
     db = SessionLocal()
@@ -75,6 +102,7 @@ async def lifespan(app: FastAPI):
     advisor_thread.start()
     telegram_thread = threading.Thread(target=_telegram_loop, args=(stop,), daemon=True)
     telegram_thread.start()
+    app.state.workers = [thread, advisor_thread, telegram_thread]
     try:
         yield
     finally:
@@ -86,9 +114,11 @@ async def lifespan(app: FastAPI):
 
 def _telegram_loop(stop: Event) -> None:
     from app.services.telegram import work_once
+    from app.services.portable import external_allowed, operation_lock
     while not stop.is_set():
         try:
-            worked = work_once(SessionLocal)
+            with operation_lock():
+                worked = work_once(SessionLocal) if external_allowed() else False
         except Exception:
             worked = False
         stop.wait(0.1 if worked else 3)
@@ -96,11 +126,16 @@ def _telegram_loop(stop: Event) -> None:
 
 def _advisor_loop(stop) -> None:
     from app.services import advisor
+    from app.services.portable import ai_allowed, operation_lock
     while not stop.is_set():
         try:
-            with SessionLocal() as db:
-                advisor.schedule(db)
-            worked = advisor.work_once(SessionLocal)
+            with operation_lock():
+                if ai_allowed():
+                    with SessionLocal() as db:
+                        advisor.schedule(db)
+                    worked = advisor.work_once(SessionLocal)
+                else:
+                    worked = False
         except Exception:
             # No raw provider/credential exceptions in logs. Leases recover interrupted jobs.
             worked = False
@@ -112,6 +147,7 @@ def _scheduler_loop(stop) -> None:
 
     from app.services import backup as backup_svc
     from app.services import jobs
+    from app.services.portable import operation_lock
 
     last_backup = time.time()  # первый автоматический бэкап — через 15 минут, не сразу
     while not stop.is_set():
@@ -121,9 +157,10 @@ def _scheduler_loop(stop) -> None:
         try:
             db = SessionLocal()
             try:
-                jobs.run_all_jobs(db)
+                with operation_lock():
+                    jobs.run_all_jobs(db)
                 now = time.time()
-                if now - last_backup >= 900:  # 15 минут
+                if not settings.app_managed and now - last_backup >= 900:  # managed backups belong to the independent control plane
                     backup_svc.create_backup(db, kind="automatic")
                     last_backup = now
             finally:
@@ -133,7 +170,24 @@ def _scheduler_loop(stop) -> None:
 
 
 def create_app() -> FastAPI:
-    app = FastAPI(title="Hackathon Command Center", lifespan=lifespan)
+    app = FastAPI(title="Hackathon Command Center", lifespan=lifespan,
+                  docs_url=None if settings.app_managed else "/docs",
+                  redoc_url=None if settings.app_managed else "/redoc",
+                  openapi_url=None if settings.app_managed else "/openapi.json")
+    if settings.app_managed:
+        import anyio
+        from app.services.portable import operation_lock
+
+        @app.middleware("http")
+        async def maintenance_fence(request, call_next):
+            if request.method in {"GET", "HEAD", "OPTIONS"}:
+                return await call_next(request)
+            lock = operation_lock()
+            await anyio.to_thread.run_sync(lock.__enter__)
+            try:
+                return await call_next(request)
+            finally:
+                lock.__exit__(None, None, None)
     register_error_handlers(app)
     app.add_middleware(
         CORSMiddleware,
@@ -160,6 +214,9 @@ def create_app() -> FastAPI:
     app.include_router(operations.router, prefix="/api/v1")
     app.include_router(sandbox.router, prefix="/api/v1")
     app.include_router(analytics.router, prefix="/api/v1")
+    if settings.app_static_dir:
+        from fastapi.staticfiles import StaticFiles
+        app.mount("/", StaticFiles(directory=settings.app_static_dir, html=True), name="frontend")
     return app
 
 

@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from app.deps import SESSION_COOKIE, active_roles, get_current_user, get_db
 from app.schemas import LoginRequest, MeOut, RoleOut, UserOut
 from app.security import hash_token
+from app.config import settings
 from app.services import auth_service
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -26,6 +27,7 @@ def login(
         SESSION_COOKIE,
         raw_token,
         httponly=True,
+        secure=request.url.scheme == "https" or (settings.app_managed and request.headers.get("x-forwarded-proto") == "https"),
         samesite="lax",
         max_age=int(auth_service.SESSION_TTL.total_seconds()),
     )

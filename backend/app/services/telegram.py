@@ -136,13 +136,16 @@ def event(db: Session, project_id: int, ntype: str, payload: dict, recipients: l
     if missing:
         lines.append('Без Telegram username: ' + ', '.join(missing))
     cfg = db.get(TelegramSettings, project_id)
-    if cfg and cfg.public_url:
+    from app.config import settings as app_settings
+    from app.services.portable import current_public_url
+    url = current_public_url() if app_settings.app_managed else (cfg.public_url if cfg else '')
+    if url:
         suffix = f'?project={project_id}'
         if payload.get('task_id'):
             suffix += f'&task={payload["task_id"]}'
         elif payload.get('incident_id'):
             suffix += f'&incident={payload["incident_id"]}'
-        lines += ['', 'Открыть: ' + cfg.public_url + suffix]
+        lines += ['', 'Открыть: ' + url + suffix]
     enqueue(db, project_id, ntype, '\n'.join(lines), names)
 
 

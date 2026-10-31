@@ -31,6 +31,7 @@ def failure_counts(db: Session, ip: str | None, login: str) -> tuple[int, int]:
     by_ip = (
         db.query(LoginEvent)
         .filter(LoginEvent.ip == ip, LoginEvent.success.is_(False), LoginEvent.created_at >= since)
+        .filter(LoginEvent.login == login if settings.app_managed else True)
         .count()
     )
     by_login = (

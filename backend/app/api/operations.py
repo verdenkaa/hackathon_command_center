@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.api.errors import api_error
+from app.config import settings
 from app.db.models import CompletionVote, Project, ProjectState, User
 from app.deps import active_roles, get_db, require_captain_or_admin
 from app.services import backup as backup_svc
@@ -44,6 +45,8 @@ def _is_captain(db: Session, user: User) -> bool:
 
 @router.post("/admin/backups", response_model=BackupOutSchema)
 def create_backup(db: Session = Depends(get_db), _u: User = Depends(require_captain_or_admin)) -> BackupOutSchema:
+    if settings.app_managed:
+        raise api_error(409, "LOCAL_PANEL_REQUIRED", "Создайте зашифрованную копию в локальной панели управления")
     record = backup_svc.create_backup(db, kind="manual")
     return BackupOutSchema.model_validate(record)
 
@@ -60,6 +63,8 @@ def restore_backup(
     db: Session = Depends(get_db),
     user: User = Depends(require_captain_or_admin),
 ) -> dict:
+    if settings.app_managed:
+        raise api_error(409, "LOCAL_PANEL_REQUIRED", "Восстановление доступно только через локальную панель при остановленной платформе")
     if not body.confirm:
         raise api_error(422, "CONFIRM_REQUIRED", "Восстановление требует явного подтверждения")
     record = backup_svc.restore_backup(db, backup_id)

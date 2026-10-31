@@ -169,6 +169,9 @@ def prepare(snap: dict[str, Any], kind: str, question: str, extra: str,
 
 def enqueue(db: Session, project_id: int, user_id: int | None, kind: str,
             question: str = '', trigger: str = 'manual') -> AdvisorJob:
+    from app.services.portable import ai_allowed
+    if not ai_allowed():
+        raise api_error(409, 'RESTORE_COOLDOWN', 'После переноса ИИ приостановлен минимум на 24 часа для защиты внешней квоты')
     from app.services.ai import get_settings
     lock(db)
     settings = get_settings(db, project_id)

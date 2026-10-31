@@ -1,5 +1,7 @@
 # Документация Hackathon Command Center
 
+Переносимая поставка, локальная панель, ключи, копии и статус приёмки: [17-portable-operations.md](17-portable-operations.md). Для управляемого Docker-запуска этот документ уточняет прежние инструкции эксплуатации.
+
 Планирование, правила пересчёта, API и проверка: [14-planning.md](14-planning.md).
 Telegram, защищённый токен, очередь и полное удаление аккаунтов: [16-telegram-and-accounts.md](16-telegram-and-accounts.md).
 

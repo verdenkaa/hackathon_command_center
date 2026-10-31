@@ -1,5 +1,6 @@
 """Separate DPAPI secret using the existing Windows vault and instance isolation."""
 from pathlib import Path
+from app.config import settings
 from app.services import advisor_vault as windows
 
 VaultUnavailable = windows.VaultUnavailable
@@ -11,6 +12,8 @@ def _path() -> Path:
 
 
 def is_saved() -> bool:
+    if settings.app_secrets_dir:
+        return bool(settings.secret_value('telegram'))
     try:
         return _path().is_file()
     except VaultUnavailable:
@@ -18,6 +21,8 @@ def is_saved() -> bool:
 
 
 def save(secret: str) -> None:
+    if settings.app_secrets_dir:
+        raise VaultUnavailable('Измените токен через локальную панель управления')
     import re
     if not re.fullmatch(r'\d{5,20}:[A-Za-z0-9_-]{20,100}', secret.strip()):
         raise VaultUnavailable('Неверный формат токена бота')
@@ -30,6 +35,11 @@ def save(secret: str) -> None:
 
 
 def load() -> str:
+    if settings.app_secrets_dir:
+        value = settings.secret_value('telegram')
+        if not value:
+            raise VaultUnavailable('Токен Telegram не задан в локальной панели')
+        return value
     try:
         return windows._crypt(_path().read_bytes(), decrypt=True).decode('utf-8')
     except (OSError, UnicodeError):
@@ -37,4 +47,6 @@ def load() -> str:
 
 
 def delete() -> None:
+    if settings.app_secrets_dir:
+        raise VaultUnavailable('Удалите токен через локальную панель управления')
     _path().unlink(missing_ok=True)

@@ -1,0 +1,6 @@
+{
+  "name": "hcc-control-dom-tests",
+  "private": true,
+  "scripts": {"test": "node --test panel_dom.cjs"},
+  "devDependencies": {"jsdom": "26.1.0"}
+}

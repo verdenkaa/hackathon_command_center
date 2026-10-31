@@ -1,30 +1,22 @@
 @echo off
 setlocal
 set "ROOT=%~dp0"
-set "PY=%ROOT%.venv\Scripts\python.exe"
+set "PY=%ROOT%.control\venv-windows\Scripts\python.exe"
 
 if not exist "%PY%" (
-  echo [1/3] Creating venv and installing backend...
-  python -m venv "%ROOT%.venv"
-  "%PY%" -m pip install --upgrade pip
-  "%PY%" -m pip install -r "%ROOT%backend\requirements.txt"
+  echo Creating local dashboard environment...
+  python -m venv "%ROOT%.control\venv-windows"
+  if errorlevel 1 goto :failed
 )
 
-if not exist "%ROOT%frontend\node_modules" (
-  echo [2/3] Installing frontend...
-  pushd "%ROOT%frontend"
-  call npm install
-  popd
-)
-
-echo [3/3] Starting servers...
-echo   Frontend: http://localhost:5173  ^<- open this
-echo   Backend : http://127.0.0.1:8000
-echo   Login   : admin / change-me
-echo.
-
-start "HCC Backend" /D "%ROOT%backend" cmd /k "%PY% -m uvicorn app.main:app --host 127.0.0.1 --port 8000"
-start "HCC Frontend" /D "%ROOT%frontend" cmd /k "npm run dev"
-
-echo Servers started in two windows. Close them to stop.
+"%PY%" -m pip install --disable-pip-version-check -q -r "%ROOT%control\requirements.lock"
+if errorlevel 1 goto :failed
+pushd "%ROOT%"
+"%PY%" -m control
+popd
 endlocal
+exit /b 0
+:failed
+echo Dashboard setup failed. Check Python 3.12+ and internet access.
+pause
+exit /b 1

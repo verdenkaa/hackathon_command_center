@@ -1,8 +1,13 @@
 # Единый запуск Hackathon Command Center (Windows)
 # Ставит зависимости при первом запуске, затем поднимает backend и frontend.
+param([switch]$Development)
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $py = Join-Path $root '.venv\Scripts\python.exe'
+if (-not $Development) {
+    & (Join-Path $root 'start.bat')
+    exit $LASTEXITCODE
+}
 
 if (-not (Test-Path $py)) {
     Write-Host "[1/3] Создание venv и установка бэкенда..." -ForegroundColor Cyan

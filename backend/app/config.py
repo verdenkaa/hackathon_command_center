@@ -20,6 +20,10 @@ class Settings(BaseSettings):
     app_secret_key: str = "change-me"
     app_host: str = "127.0.0.1"
     app_port: int = 8000
+    app_managed: bool = False
+    app_secrets_dir: str = ""
+    app_static_dir: str = ""
+    app_installation_id: str = ""
     app_data_dir: str = str(PROJECT_ROOT / "data")
     database_url: str = ""
 
@@ -36,6 +40,12 @@ class Settings(BaseSettings):
     ai_priority_provider: str = "gemini"
     google_drive_folder_id: str = ""
     fxtunnel_token: str = ""
+
+    def secret_value(self, name: str) -> str:
+        if name not in {"operator", "bootstrap_password", "gemini", "telegram"} or not self.app_secrets_dir:
+            return ""
+        path = Path(self.app_secrets_dir) / name
+        return path.read_text(encoding="utf-8").strip() if path.is_file() else ""
 
     @property
     def data_dir(self) -> Path:

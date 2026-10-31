@@ -12,7 +12,7 @@ class VaultUnavailable(RuntimeError):
 
 
 def available() -> bool:
-    return os.name == 'nt'
+    return bool(settings.app_secrets_dir) or os.name == 'nt'
 
 
 def _path() -> Path:
@@ -52,6 +52,8 @@ def _crypt(value: bytes, *, decrypt: bool = False) -> bytes:
 
 
 def is_saved() -> bool:
+    if settings.app_secrets_dir:
+        return bool(settings.secret_value('gemini'))
     try:
         return _path().is_file()
     except VaultUnavailable:
@@ -59,6 +61,8 @@ def is_saved() -> bool:
 
 
 def save(secret: str) -> None:
+    if settings.app_secrets_dir:
+        raise VaultUnavailable('Измените ключ через локальную панель управления')
     if not secret.strip() or len(secret) > 4096:
         raise VaultUnavailable('Ключ пустой или слишком длинный')
     encrypted = _crypt(secret.strip().encode('utf-8'))
@@ -70,6 +74,11 @@ def save(secret: str) -> None:
 
 
 def load() -> str:
+    if settings.app_secrets_dir:
+        value = settings.secret_value('gemini')
+        if not value:
+            raise VaultUnavailable('Ключ Gemini не задан в локальной панели')
+        return value
     try:
         return _crypt(_path().read_bytes(), decrypt=True).decode('utf-8')
     except (OSError, UnicodeError) as exc:
@@ -77,5 +86,7 @@ def load() -> str:
 
 
 def delete() -> None:
+    if settings.app_secrets_dir:
+        raise VaultUnavailable('Удалите ключ через локальную панель управления')
     _path().unlink(missing_ok=True)
 

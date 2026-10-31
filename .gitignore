@@ -18,6 +18,7 @@ frontend/.vite/
 
 # Runtime data (kept outside git)
 data/
+.control/
 
 # Secrets and local env
 .env
