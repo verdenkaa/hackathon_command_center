@@ -12,5 +12,9 @@ def test_managed_link_expires_and_never_falls_back_to_old_project_url(tmp_path, 
     assert current_public_url() == ''
     path.write_text(json.dumps({'url':'https://team.fxtun.ru','expires':time.time()+60}))
     assert current_public_url() == 'https://team.fxtun.ru'
-    path.write_text(json.dumps({'url':'https://old.fxtun.ru','expires':time.time()-1}))
+    path.write_text(json.dumps({'url':'https://team.fxtun.dev','expires':time.time()+60}))
+    assert current_public_url() == 'https://team.fxtun.dev'
+    path.write_text(json.dumps({'url':'https://team.fxtun.dev.example','expires':time.time()+60}))
+    assert current_public_url() == ''
+    path.write_text(json.dumps({'url':'https://old.fxtun.dev','expires':time.time()-1}))
     assert current_public_url() == ''

@@ -1,0 +1,42 @@
+[Unit]
+Description=Aion web application
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=4
+
+[Service]
+User=aion-web
+Group=aion-web
+WorkingDirectory=/opt/aion/current/backend
+StateDirectory=aion-web
+StateDirectoryMode=0700
+RuntimeDirectory=aion-web
+RuntimeDirectoryMode=0750
+EnvironmentFile=/etc/aion/web.env
+Environment=PYTHONPATH=/opt/aion/current:/opt/aion/current/backend
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=APP_ENV=production
+Environment=APP_MANAGED=true
+Environment=APP_DATA_DIR=/var/lib/aion-web
+Environment=APP_STATIC_DIR=/opt/aion/current/frontend/dist
+Environment=APP_FIRST_ADMIN_LOGIN=admin
+Environment=APP_INSTALLATION_ID=vps
+Environment=APP_SECRETS_DIR=%d
+LoadCredential=bootstrap_password:/etc/aion/credentials/bootstrap_password
+LoadCredential=operator:/etc/aion/credentials/operator
+LoadCredential=telegram:/etc/aion/credentials/telegram
+ExecStart=/opt/aion/current/.venv/bin/uvicorn app.main:app --uds /run/aion-web/aion.sock --workers 1 --proxy-headers --forwarded-allow-ips=* --timeout-graceful-shutdown 30
+ExecStartPost=/usr/bin/curl --silent --show-error --fail --retry 30 --retry-all-errors --retry-delay 1 --retry-max-time 60 --max-time 2 --noproxy * --unix-socket /run/aion-web/aion.sock http://${AION_HOST}/health
+TimeoutStartSec=90
+TimeoutStopSec=85
+Restart=on-failure
+RestartSec=4
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

@@ -31,5 +31,9 @@ export function useProjectUpdates(refresh:()=>void) {
   const latest=useRef(refresh)
   latest.current=refresh
   const project=currentProject()
-  useEffect(()=>watchProject(project,()=>latest.current()),[project])
+  useEffect(()=>{
+    let pending:ReturnType<typeof setTimeout>|undefined
+    const stop=watchProject(project,()=>{if(pending)clearTimeout(pending);pending=setTimeout(()=>latest.current(),80)})
+    return()=>{stop();if(pending)clearTimeout(pending)}
+  },[project])
 }

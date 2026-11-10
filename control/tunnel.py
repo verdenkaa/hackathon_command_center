@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from control.vault import atomic_write
-from control.integrations import tunnel_binary
+from control.integrations import FXTUNNEL_SERVER, tunnel_binary
 
 
 def configuration(subdomain: str) -> dict[str, Any]:
@@ -27,7 +27,7 @@ def configuration(subdomain: str) -> dict[str, Any]:
 
 
 def public_link(line: str) -> str | None:
-    match = re.search(r"https://[a-z0-9-]+\.fxtun\.ru(?=[\s\"']|$)", line)
+    match = re.search(r"https://[a-z0-9-]+\.fxtun\.(?:dev|ru)(?=[\s\"']|$)", line)
     return match.group(0) if match else None
 
 
@@ -47,12 +47,13 @@ class Tunnel:
             raise ValueError("Введите секрет fxTunnel в локальной панели")
         binary = tunnel_binary()
         if not binary:
-            raise ValueError("Установите официальный CLI fxTunnel с fxtun.ru/docs/install, затем повторите запуск")
+            raise ValueError("Установите официальный CLI fxTunnel с fxtun.dev, затем повторите запуск")
         self.stop()
         path = self.folder / "fxtunnel.json"
         atomic_write(path, json.dumps(configuration(subdomain)).encode())
         environment = {**os.environ, "FXTUNNEL_TOKEN": token, "FXTUNNEL_INSPECT_ENABLED": "false"}
-        self.process = subprocess.Popen([binary, "--config", str(path), "--no-inspect", "--log-level", "info"], cwd=self.folder,
+        self.process = subprocess.Popen([binary, "--config", str(path), "--server", FXTUNNEL_SERVER,
+                                        "--no-inspect", "--log-level", "info"], cwd=self.folder,
                                         env=environment, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                         creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
         self.error = "Подключаемся; публичный адрес ещё не проверен"

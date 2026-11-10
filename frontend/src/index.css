@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap');
+/* System font fallbacks keep the local interface independent of external CDNs. */
 
 /* Planning uses the platform palette and a scrollable, mouse navigable canvas. */
 .plan-heading,.plan-toolbar,.plan-legend,.plan-edge-selection {display:flex;gap:10px;align-items:center;flex-wrap:wrap}
@@ -221,6 +221,7 @@ th { color: var(--muted); font-weight: 500; }
   background: var(--panel-2); border: 1px solid var(--border); font-size: 12px; font-weight: 600; cursor: pointer;
 }
 .avatar.active { border-color: var(--accent); color: var(--accent); }
+button.avatar {padding:0}
 
 /* Выпадающее меню уведомлений */
 .dropdown { position: relative; }
@@ -416,6 +417,17 @@ input[type="datetime-local"] { min-width: 180px; color-scheme: dark; }
 .situation-card.needs-attention { border-left-color: var(--error); }
 .situation-card.is-resolved { border-left-color: var(--ok); }
 .situation-card p { margin: 8px 0; }
+.error-toast {position:fixed;bottom:18px;left:18px;right:18px;z-index:100;background:var(--panel);border:1px solid var(--error);padding:14px;border-radius:6px;box-shadow:0 8px 30px #0008}
+.saving-status {position:fixed;bottom:12px;right:16px;z-index:90;background:var(--panel);padding:8px 14px;border:1px solid var(--border);border-radius:6px}
+.empty-state,.quick-start {margin:12px 0}
+.setup-steps {display:flex;gap:10px;flex-wrap:wrap;margin-top:10px}
+.schedule-list {display:grid;gap:8px;padding:10px;min-width:0}
+.schedule-task {display:grid;gap:6px;text-align:left;overflow-wrap:anywhere;padding:12px}
+.schedule-task span {font-size:12px;color:var(--muted)}
+.plan-workspace.list-mode {display:block;height:auto}
+.plan-workspace.list-mode .plan-backlog,.plan-workspace.list-mode .gantt-viewport {display:none}
+.plan-workspace.list-mode .plan-task-panel {max-height:none;border-left:0;border-top:1px solid var(--border)}
+@media(max-width:700px){.side-panel{width:100%;max-width:100%;padding:14px}.plan-workspace.list-mode.with-panel{display:block}.row{min-width:0}.plan-placement-form input,.plan-placement-form select{width:100%}}
 .situation-card details { margin-top: 10px; }
 .situation-settings input[type="checkbox"] { width: auto; flex: 0 0 auto; }
 .situation-settings .row { justify-content: flex-start; gap: 10px; }

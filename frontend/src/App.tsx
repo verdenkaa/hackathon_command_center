@@ -8,8 +8,8 @@ import { Admin } from './Admin'
 import { Settings } from './Settings'
 import Planning from './Planning'
 import {PlanningPreviewHost} from './PlanningPreview'
-
-type Tab = 'board' | 'planning' | 'incidents' | 'analytics' | 'admin' | 'settings'
+import {parseRoute,writeRoute,Tab} from './navigation'
+import {QuickStart} from './QuickStart'
 
 const TABS: { key: Tab; label: string }[] = [
   { key: 'board', label: 'Доска' },
@@ -23,17 +23,30 @@ const TABS: { key: Tab; label: string }[] = [
 export default function App() {
   const [me, setMe] = useState<Me | null>(null)
   const [loading, setLoading] = useState(true)
-  const [tab, setTab] = useState<Tab>('board')
-  const [projectId, setProjectId] = useState(currentProject())
+  const [tab, setTabState] = useState<Tab>(()=>parseRoute(window.location.search).tab)
+  const setTab=(next:Tab)=>{setTabState(next);writeRoute({tab:next})}
+  const [projectId, setProjectId] = useState(()=>{const id=parseRoute(window.location.search).project??currentProject();setCurrentProject(id);return id})
   const [projects, setProjects] = useState<Project[]>([])
   const [projectsLoaded, setProjectsLoaded] = useState(false)
   const [notifications, setNotifications] = useState<Notification[]>([])
   const [notifOpen, setNotifOpen] = useState(false)
   const notifRef = useRef<HTMLDivElement>(null)
-  const [navigation, setNavigation] = useState<{type:'task'|'incident';id:number;incident?:Incident}|null>(null)
+  type Target={type:'task'|'incident';id:number;incident?:Incident}|null
+  const [navigation, setNavigationState] = useState<Target>(null)
+  const setNavigation=(next:Target)=>{setNavigationState(next);writeRoute({project:currentProject(),task:next?.type==='task'?next.id:null,incident:next?.type==='incident'?next.id:null})}
   const [navigationKey, setNavigationKey] = useState(0)
   const [message, setMessage] = useState('')
+  const [authError,setAuthError]=useState(''),[projectsError,setProjectsError]=useState(''),[globalError,setGlobalError]=useState(''),[saving,setSaving]=useState(0)
+  const [locationVersion,setLocationVersion]=useState(0)
   const deepLinkOpened = useRef(false)
+  const loadSession=useCallback(()=>{setLoading(true);setAuthError('');api.me().then(setMe).catch(e=>{if(e instanceof ApiError&&[401,403].includes(e.status))setMe(null);else setAuthError(e.message)}).finally(()=>setLoading(false))},[])
+  useEffect(()=>{
+    const rejected=(event:PromiseRejectionEvent)=>{event.preventDefault();setGlobalError(event.reason instanceof Error?event.reason.message:'Не удалось выполнить действие. Попробуйте снова.')}
+    const progress=(event:Event)=>setSaving((event as CustomEvent<number>).detail)
+    const pop=()=>{deepLinkOpened.current=false;const route=parseRoute(window.location.search);setTabState(route.tab);setNavigationState(null);if(route.project){setCurrentProject(route.project);setProjectId(route.project)};setLocationVersion(v=>v+1)}
+    window.addEventListener('unhandledrejection',rejected);window.addEventListener('aion-saving',progress);window.addEventListener('popstate',pop)
+    return()=>{window.removeEventListener('unhandledrejection',rejected);window.removeEventListener('aion-saving',progress);window.removeEventListener('popstate',pop)}
+  },[])
   useEffect(()=>{
     const close=(e:PointerEvent)=>{if(!notifRef.current?.contains(e.target as Node))setNotifOpen(false)}
     const escape=(e:KeyboardEvent)=>{if(e.key==='Escape')setNotifOpen(false)}
@@ -43,10 +56,11 @@ export default function App() {
   },[])
 
   useEffect(() => {
-    api.me().then(setMe).catch(() => setMe(null)).finally(() => setLoading(false))
-  }, [])
+    loadSession()
+  }, [loadSession])
 
   const reloadProjects = useCallback(() => {
+    setProjectsError('')
     api.projects().then((items) => {
       setProjects(items)
       setProjectId((previous) => {
@@ -55,7 +69,7 @@ export default function App() {
         return next
       })
       setProjectsLoaded(true)
-    }).catch(() => {})
+    }).catch(e=>setProjectsError(e.message))
   }, [])
 
   useEffect(() => {
@@ -74,11 +88,11 @@ export default function App() {
     if(!projects.some(p=>p.id===project)){setMessage('Нет доступа к проекту из ссылки');return}
     setCurrentProject(project);setProjectId(project)
     if(Number.isSafeInteger(task)&&task>0){
-      api.task(task).then(value=>{if(value.project_id!==project)throw new Error('Объект не принадлежит проекту');setNavigation({type:'task',id:task});setNavigationKey(v=>v+1);setTab('board')}).catch(e=>setMessage(e.message))
+      api.task(task).then(value=>{if(value.project_id!==project)throw new Error('Объект не принадлежит проекту');setNavigationState({type:'task',id:task});setNavigationKey(v=>v+1);setTabState(parseRoute(window.location.search).tab==='planning'?'planning':'board')}).catch(e=>setMessage(e.message))
     }else if(Number.isSafeInteger(incident)&&incident>0){
-      api.incident(incident).then(value=>{if(value.project_id!==project)throw new Error('Объект не принадлежит проекту');setNavigation({type:'incident',id:incident,incident:value});setNavigationKey(v=>v+1);setTab('incidents')}).catch(e=>setMessage(e.message))
+      api.incident(incident).then(value=>{if(value.project_id!==project)throw new Error('Объект не принадлежит проекту');setNavigationState({type:'incident',id:incident,incident:value});setNavigationKey(v=>v+1);setTabState('incidents')}).catch(e=>setMessage(e.message))
     }
-  },[me,projectsLoaded,projects])
+  },[me,projectsLoaded,projects,locationVersion])
 
   useEffect(() => {
     if (!me) return
@@ -89,13 +103,14 @@ export default function App() {
   }, [me])
 
   if (loading) return <div style={{ padding: 24 }}>Загрузка…</div>
+  if(authError)return <div role="alert" className="card">{authError} <button onClick={loadSession}>Повторить вход</button></div>
   if (!me) return <Login onLogin={(user) => {
     setTab('board')
     setProjects([])
     setProjectsLoaded(false)
     setMe(user)
   }} />
-  if (!projectsLoaded) return <div style={{ padding: 24 }}>Загрузка проекта Aion…</div>
+  if (!projectsLoaded) return <div style={{ padding: 24 }} role={projectsError?'alert':'status'}>{projectsError||'Загрузка проекта Aion…'}{projectsError&&<button onClick={reloadProjects}>Повторить загрузку</button>}</div>
 
   const isAdmin = me.roles.some((r) => r.role === 'admin')
   const unread = notifications.filter((n) => !n.read_at).length
@@ -113,6 +128,7 @@ export default function App() {
     setCurrentProject(id)
     setProjectId(id)
     setTab('board')
+    writeRoute({project:id,tab:'board',task:null,incident:null})
   }
 
   return (
@@ -127,7 +143,7 @@ export default function App() {
         </select>
         <nav className="tabs" style={{ margin: 0, borderBottom: 'none', flex: 1 }}>
           {TABS.filter((t) => t.key !== 'admin' || isAdmin).map((t) => (
-            <button key={t.key} className={tab === t.key ? 'active' : ''} onClick={() => setTab(t.key)}>
+            <button key={t.key} className={tab === t.key ? 'active' : ''} onClick={() => {setNavigation(null);setTab(t.key)}}>
               {t.label}
             </button>
           ))}
@@ -203,7 +219,11 @@ export default function App() {
       </div>
 
       <div style={{ marginTop: 12 }}>
+        {saving>0&&<div role="status" className="saving-status">Сохранение…</div>}
+        {globalError&&<div role="alert" className="error-toast">{globalError} <button onClick={()=>setGlobalError('')}>Закрыть сообщение</button></div>}
+        {projectsError&&<div role="alert" className="error">{projectsError} <button onClick={reloadProjects}>Повторить загрузку</button></div>}
         {message && <div role="status" className="card">{message}</div>}
+        {tab==='board'&&isAdmin&&<QuickStart key={projectId} project={projects.find(p=>p.id===projectId)} onNavigate={setTab} onCreate={()=>{writeRoute({newtask:'1'});setNavigationKey(v=>v+1)}}/>}
         {tab === 'board' && <Board key={`${projectId}-${navigationKey}`} me={me} openTaskId={navigation?.type==='task'?navigation.id:null}
           onOpenIncident={id=>{setNavigation({type:'incident',id});setNavigationKey(v=>v+1);setTab('incidents')}}/>}
         {tab === 'incidents' && <Incidents key={`${projectId}-${navigationKey}`} me={me} initialIncident={navigation?.incident} openIncidentId={navigation?.type==='incident'?navigation.id:null} />}
@@ -211,7 +231,7 @@ export default function App() {
           onOpenTask={id=>{setNavigation({type:'task',id});setNavigationKey(v=>v+1);setTab('board')}}
           onOpenIncident={id=>{setNavigation({type:'incident',id});setNavigationKey(v=>v+1);setTab('incidents')}}
           onPlanning={()=>setTab('planning')}/>}
-        {tab === 'planning' && <Planning key={projectId} me={me}/>}
+        {tab === 'planning' && <Planning key={`${projectId}-${navigationKey}`} me={me} openTaskId={navigation?.type==='task'?navigation.id:null}/>}
         {tab === 'admin' && isAdmin && <Admin key={projectId} />}
         {tab === 'settings' && <Settings key={projectId} me={me} onProjectsChanged={reloadProjects}
           onOpenProject={(id, view) => {switchProject(id);setTab(view)}} />}

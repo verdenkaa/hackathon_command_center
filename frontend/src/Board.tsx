@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {useProjectUpdates} from './realtime'
+import {clearDraft,useDraftField,useStoredState,useTimerSeconds} from './editor'
+import {useUrlFilter,writeRoute} from './navigation'
 import {taskTone,TONE_LABELS,IncidentMark} from './taskVisuals'
-import { api, Column, DashboardKpi, Incident, Me, Module, Participant, Task } from './api'
+import { api, ApiError, Column, DashboardKpi, Incident, Me, Module, Participant, Task, currentProject } from './api'
 import { Badge, Field, Modal, badgeForStatus, fmt, fmtDate, hmToSeconds, parseUTC, secondsToHm, useLoad, PRIORITIES, toMoscowInput, fromMoscowInput, incidentKind, incidentLabel } from './ui'
 
 const PRIORITY_COLOR: Record<string, string> = {
@@ -35,10 +37,14 @@ export default function Board({ me, openTaskId, onOpenIncident }: { me: Me; open
   const [modules] = useLoad<Module[]>(api.modules)
   const [incidents, setIncidents] = useState<Incident[]>([])
   const [filterUser, setFilterUser] = useState<number | null>(null)
-  const [filterTag, setFilterTag] = useState('')
-  const [search, setSearch] = useState('')
-  const [createOpen, setCreateOpen] = useState(false)
+  const [filterTag, setFilterTag] = useUrlFilter('tag')
+  const [search, setSearch] = useUrlFilter('q')
+  const [filterTrack,setFilterTrack]=useUrlFilter('track')
+  const [quick,setQuick]=useUrlFilter('filter')
+  const [allColumns,setAllColumns]=useStoredState(`aion-board-columns-${currentProject()}`,false)
+  const [createOpen, setCreateOpen] = useState(()=>typeof window!=='undefined'&&new URLSearchParams(window.location.search).get('newtask')==='1')
   const [selectedId, setSelectedId] = useState<number | null>(openTaskId ?? null)
+  const selectTask=(id:number|null)=>{setSelectedId(id);writeRoute({project:currentProject(),tab:'board',task:id,incident:null})}
   const [draggingId, setDraggingId] = useState<number | null>(null)
   const draggedTask=useRef<Task|null>(null)
   const reloadSequence=useRef(0)
@@ -52,6 +58,7 @@ export default function Board({ me, openTaskId, onOpenIncident }: { me: Me; open
     setTasks(t)
     setDash(d)
     setIncidents(i)
+    setError('')
   }, [])
   useProjectUpdates(()=>{reload().catch(e=>setError(e.message))})
 
@@ -60,7 +67,7 @@ export default function Board({ me, openTaskId, onOpenIncident }: { me: Me; open
   }, [reload])
 
   useEffect(() => {
-    const id = setInterval(() => {reload().catch(()=>{})}, 30000)
+    const id = setInterval(() => {reload().catch(e=>setError(e.message))}, 30000)
     return () => clearInterval(id)
   }, [])
 
@@ -68,10 +75,15 @@ export default function Board({ me, openTaskId, onOpenIncident }: { me: Me; open
     return tasks.filter((t) => {
       if (filterUser !== null && !t.assignees.some((a) => a.user_id === filterUser)) return false
       if (filterTag && !(t.tags ?? []).includes(filterTag)) return false
-      if (search && !t.title.toLowerCase().includes(search.toLowerCase())) return false
+      if (filterTrack && (filterTrack==='none'?t.module_id!==null:t.module_id!==Number(filterTrack)))return false
+      if (quick==='mine'&&!t.assignees.some(a=>a.user_id===me.id))return false
+      if (quick==='unassigned'&&t.assignees.length)return false
+      if (quick==='late'&&!(t.deadline&&parseUTC(t.deadline).getTime()<Date.now()&&!['done','trash'].includes(semantic(t))))return false
+      if (quick==='blocked'&&!unfinishedBlockers(t,tasks).length&&!t.blocking_incidents?.length)return false
+      if (search && !`${t.id} ${t.title} ${t.assignees.map(a=>a.display_name).join(' ')}`.toLowerCase().includes(search.toLowerCase())) return false
       return true
     })
-  }, [tasks, filterUser, filterTag, search])
+  }, [tasks, filterUser, filterTag, search,filterTrack,quick,me.id])
 
   const { blockedIds, affectedIds } = useMemo(() => {
     const blocked = new Set<number>()
@@ -86,6 +98,8 @@ export default function Board({ me, openTaskId, onOpenIncident }: { me: Me; open
   }, [incidents, tasks])
 
   const selected = tasks.find((t) => t.id === selectedId) ?? null
+  const compactKeys=new Set([columns.find(c=>c.semantic==='normal')?.id,columns.filter(c=>c.semantic==='normal')[1]?.id,columns.find(c=>c.semantic==='active')?.id,columns.find(c=>c.key==='testing')?.id,columns.find(c=>c.semantic==='done')?.id])
+  const visibleColumns=allColumns?columns:columns.filter(c=>compactKeys.has(c.id))
 
   async function handleDrop(columnKey: string) {
     if (draggingId == null) return
@@ -104,13 +118,13 @@ export default function Board({ me, openTaskId, onOpenIncident }: { me: Me; open
   return (
     <div>
       <div className="row" style={{ flexWrap: 'wrap', margin: '4px 0 12px' }}>
-        <Kpi label="Прогресс" value={`${dash?.progress_percent ?? 0}%`} />
-        <Kpi label="В работе" value={dash?.in_progress_tasks ?? 0} />
-        <Kpi label="Завершено" value={dash?.completed_tasks ?? 0} />
-        <Kpi label="Просрочено" value={dash?.overdue_tasks ?? 0} warn={(dash?.overdue_tasks ?? 0) > 0} />
-        <Kpi label="Активные таймеры" value={dash?.active_timers ?? 0} />
-        <Kpi label="Суммарное время задач" value={fmt(dash?.actual_seconds ?? 0)} />
-        <Kpi label="Время в работе" value={fmt(dash?.calendar_seconds ?? 0)} />
+        <Kpi label="Прогресс" value={dash?`${dash.progress_percent}%`:'—'} />
+        <Kpi label="В работе" value={dash?.in_progress_tasks ?? '—'} />
+        <Kpi label="Завершено" value={dash?.completed_tasks ?? '—'} />
+        <Kpi label="Просрочено" value={dash?.overdue_tasks ?? '—'} warn={(dash?.overdue_tasks ?? 0) > 0} />
+        <Kpi label="Активные таймеры" value={dash?.active_timers ?? '—'} />
+        <Kpi label="Суммарное время задач" value={dash?fmt(dash.actual_seconds):'—'} />
+        <Kpi label="Время в работе" value={dash?fmt(dash.calendar_seconds):'—'} />
         <div className="grow" />
         <button className="primary" onClick={() => setCreateOpen(true)}>+ Задача</button>
       </div>
@@ -118,33 +132,40 @@ export default function Board({ me, openTaskId, onOpenIncident }: { me: Me; open
       {/* Фильтры */}
       <div className="row" style={{ marginBottom: 12, flexWrap: 'wrap' }}>
         <div className="avatar-row">
-          <div
+          <button
             className={`avatar ${filterUser === null ? 'active' : ''}`}
             title="Все"
             onClick={() => setFilterUser(null)}
           >
             Все
-          </div>
+          </button>
           {participants?.map((p) => (
-            <div
+            <button
               key={p.id}
               className={`avatar ${filterUser === p.id ? 'active' : ''}`}
               title={p.display_name}
+              aria-label={`Задачи: ${p.display_name}`} aria-pressed={filterUser===p.id}
               onClick={() => setFilterUser(filterUser === p.id ? null : p.id)}
             >
               {p.display_name.slice(0, 1).toUpperCase()}
-            </div>
+            </button>
           ))}
         </div>
         <input placeholder="Поиск…" value={search} onChange={(e) => setSearch(e.target.value)} style={{ maxWidth: 180 }} />
         <input placeholder="Тег…" value={filterTag} onChange={(e) => setFilterTag(e.target.value)} style={{ maxWidth: 120 }} />
         {filterTag && <button className="small ghost" onClick={() => setFilterTag('')}>✕</button>}
+        <select aria-label="Фильтр задач" value={quick} onChange={e=>setQuick(e.target.value)} style={{width:'auto'}}><option value="">Все задачи</option><option value="mine">Мои задачи</option><option value="unassigned">Без исполнителя</option><option value="late">Просроченные</option><option value="blocked">С препятствиями</option></select>
+        <select aria-label="Фильтр по треку" value={filterTrack} onChange={e=>setFilterTrack(e.target.value)} style={{width:'auto'}}><option value="">Все треки</option><option value="none">Без трека</option>{modules?.map(m=><option key={m.id} value={m.id}>{m.name}</option>)}</select>
+        <button onClick={()=>setAllColumns(!allColumns)}>{allColumns?'Компактная доска':`Все колонки (${columns.length})`}</button>
+        <button className={quick==='mine'?'primary':''} onClick={()=>setQuick(quick==='mine'?'':'mine')}>Мои задачи</button>
       </div>
 
-      {error && <div className="error" style={{ margin: '8px 0' }}>{error}</div>}
+      {error && <div className="error" role="alert" style={{ margin: '8px 0' }}>{error} <button onClick={()=>reload().catch(e=>setError(e.message))}>Повторить загрузку</button></div>}
+      {dash&&tasks.length===0&&<div className="card empty-state"><h3>Начните с первой задачи</h3><p>Назначьте исполнителя и оценку, затем разместите задачу в планировании.</p><button onClick={()=>setCreateOpen(true)}>Создать первую задачу</button></div>}
+      {quick==='mine'&&<section className="card empty-state"><h3>Мои задачи</h3><p>Готовы к работе: {filtered.filter(t=>taskTone(t,tasks)==='ready').length} · В работе: {filtered.filter(t=>semantic(t)==='active'||t.timer?.state==='running').length} · С препятствиями: {filtered.filter(t=>unfinishedBlockers(t,tasks).length||t.blocking_incidents?.length).length}</p></section>}
 
       <div className="board">
-        {columns.map((col) => {
+        {visibleColumns.map((col) => {
           const colTasks = filtered.filter((t) => t.column_id === col.id)
           return (
             <div
@@ -163,7 +184,7 @@ export default function Board({ me, openTaskId, onOpenIncident }: { me: Me; open
                   dragging={draggingId === task.id}
                   blocked={blockedIds.has(task.id)}
                   affected={affectedIds.has(task.id)}
-                  onOpen={() => setSelectedId(task.id)}
+                  onOpen={() => selectTask(task.id)}
                   onDragStart={() => {draggedTask.current=task;setDraggingId(task.id)}}
                   onDragEnd={() => {draggedTask.current=null;setDraggingId(null)}}
                   onTimer={async (action) => {
@@ -193,9 +214,10 @@ export default function Board({ me, openTaskId, onOpenIncident }: { me: Me; open
       {createOpen && (
         <TaskForm
           columns={columns}
-          onClose={() => setCreateOpen(false)}
+          onClose={() => {setCreateOpen(false);writeRoute({newtask:null},true)}}
           onCreated={async () => {
             setCreateOpen(false)
+            writeRoute({newtask:null},true)
             reload()
           }}
         />
@@ -203,7 +225,7 @@ export default function Board({ me, openTaskId, onOpenIncident }: { me: Me; open
 
       {selected && (
         <>
-          <div className="side-backdrop" onClick={() => setSelectedId(null)} />
+          <div className="side-backdrop" onClick={() => selectTask(null)} />
           <div className="side-panel">
             <TaskPanel
               onOpenIncident={onOpenIncident}
@@ -217,7 +239,7 @@ export default function Board({ me, openTaskId, onOpenIncident }: { me: Me; open
               onChange={async () => {
                 reload()
               }}
-              onClose={() => setSelectedId(null)}
+              onClose={() => selectTask(null)}
             />
           </div>
         </>
@@ -249,6 +271,7 @@ export function TaskCard({ task, tasks=[task], columns, dragging, blocked, affec
   onDragEnd: () => void
 }) {
   const running = task.timer?.state === 'running'
+  const liveSeconds = useTimerSeconds(task.timer)
   const blockers=task.blocking_incidents ?? []
   const blockKind=blockers.some(i=>incidentKind(i)==='red')?'red':blockers.some(i=>incidentKind(i)==='purple')?'purple':'yellow'
   const overdue =
@@ -259,6 +282,8 @@ export function TaskCard({ task, tasks=[task], columns, dragging, blocked, affec
     <div
       className={`task-card tone-${taskTone(task,tasks)}`}
       draggable
+      role="button" tabIndex={0} aria-label={`Открыть задачу ${task.title}`}
+      onKeyDown={e=>{if(e.target===e.currentTarget&&(e.key==='Enter'||e.key===' ')){e.preventDefault();onOpen()}}}
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
       onClick={onOpen}
@@ -296,7 +321,7 @@ export function TaskCard({ task, tasks=[task], columns, dragging, blocked, affec
           )}
           {task.timer && (
             <span className="mono" style={{ fontSize: 11, color: running ? 'var(--ok)' : 'var(--muted)' }}>
-              {fmt(task.timer.total_seconds)}
+              {fmt(liveSeconds)}
             </span>
           )}
         </span>
@@ -316,23 +341,29 @@ export function TaskCard({ task, tasks=[task], columns, dragging, blocked, affec
 }
 
 export function TaskForm({ columns, onClose, onCreated }: { columns: Column[]; onClose: () => void; onCreated: (taskId:number) => void }) {
-  const [title, setTitle] = useState('')
-  const [description, setDescription] = useState('')
-  const [priority, setPriority] = useState('medium')
-  const [moduleId, setModuleId] = useState<number | null>(null)
-  const [estimateHm, setEstimateHm] = useState('')
-  const [deadline, setDeadline] = useState('')
-  const [tags, setTags] = useState('')
-  const [columnKey, setColumnKey] = useState(columns.find(c => c.semantic !== 'trash' && c.semantic !== 'done')?.key ?? columns[0]?.key ?? '')
-  const [assignees, setAssignees] = useState<Record<number, boolean>>({})
+  const key=`aion-draft-new-${currentProject()}-`
+  const [title, setTitle] = useStoredState(key+'title','')
+  const [description, setDescription] = useStoredState(key+'description','')
+  const [priority, setPriority] = useStoredState(key+'priority','medium')
+  const [moduleId, setModuleId] = useStoredState<number | null>(key+'module',null)
+  const [estimateHm, setEstimateHm] = useStoredState(key+'estimate','')
+  const [deadline, setDeadline] = useStoredState(key+'deadline','')
+  const [tags, setTags] = useStoredState(key+'tags','')
+  const [columnKey, setColumnKey] = useStoredState(key+'column',columns.find(c => c.semantic !== 'trash' && c.semantic !== 'done')?.key ?? columns[0]?.key ?? '')
+  const [assignees, setAssignees] = useStoredState<Record<number, boolean>>(key+'assignees',{})
+  const [attempt,setAttempt]=useStoredState<{key:string;payload:string}|null>(key+'attempt',null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [participants] = useLoad<Participant[]>(api.participants)
   const [modules] = useLoad<Module[]>(api.modules)
 
+  useEffect(()=>{
+    if(columns.length&&!columns.some(c=>c.key===columnKey))setColumnKey(columns.find(c=>c.semantic!=='trash'&&c.semantic!=='done')?.key??columns[0].key)
+  },[columns,columnKey,setColumnKey])
+
   async function submit(e: React.FormEvent) {
     e.preventDefault()
-    if (!title.trim()) return
+    if (!title.trim() || busy) return
     setBusy(true)
     setError('')
     try {
@@ -340,7 +371,7 @@ export function TaskForm({ columns, onClose, onCreated }: { columns: Column[]; o
       const assigneeList = Object.entries(assignees)
         .filter(([, v]) => v)
         .map(([uid], i) => ({ user_id: Number(uid), is_primary: i === 0 }))
-      const created = await api.createTask({
+      const payload = {
         title: title.trim(),
         description: description || null,
         priority,
@@ -349,12 +380,17 @@ export function TaskForm({ columns, onClose, onCreated }: { columns: Column[]; o
         deadline: fromMoscowInput(deadline),
         tags: tags.split(',').map((t) => t.trim()).filter(Boolean),
         column_key: columnKey,
-      })
-      if (assigneeList.length > 0) {
-        await api.setAssignees(created.id, assigneeList)
+        assignees: assigneeList,
       }
+      const encoded=JSON.stringify(payload)
+      if(attempt && attempt.payload!==encoded)throw new Error('Сначала повторите исходную попытку или проверьте доску: задача могла сохраниться. Для нового запроса сбросьте попытку.')
+      const requestKey=attempt?.key??crypto.randomUUID()
+      setAttempt({key:requestKey,payload:encoded})
+      const created = await api.createTask({...payload,creation_key:requestKey})
+      clearDraft(key)
       onCreated(created.id)
     } catch (err) {
+      if(err instanceof ApiError && [400,403,404,422].includes(err.status))setAttempt(null)
       setError((err as Error).message)
     } finally {
       setBusy(false)
@@ -364,6 +400,7 @@ export function TaskForm({ columns, onClose, onCreated }: { columns: Column[]; o
   return (
     <Modal title="Новая задача" onClose={onClose}>
       <form onSubmit={submit}>
+        <p className="muted">Черновик сохраняется в этой вкладке при закрытии формы.</p>
         <Field label="Название *">
           <input value={title} onChange={(e) => setTitle(e.target.value)} autoFocus />
         </Field>
@@ -417,9 +454,10 @@ export function TaskForm({ columns, onClose, onCreated }: { columns: Column[]; o
           </div>
         </Field>
         {error && <div className="error" style={{ marginBottom: 8 }}>{error}</div>}
+        {attempt&&<button type="button" className="small" onClick={()=>{if(confirm('Проверьте доску перед новой попыткой. Начать создание заново?'))setAttempt(null)}}>Начать заново после проверки</button>}
         <div className="row" style={{ justifyContent: 'flex-end' }}>
           <button type="button" onClick={onClose}>Отмена</button>
-          <button className="primary" type="submit" disabled={busy}>{busy ? 'Создание…' : 'Создать'}</button>
+          <button className="primary" type="submit" disabled={busy||!columnKey}>{busy ? 'Создание…' : 'Создать'}</button>
         </div>
       </form>
     </Modal>
@@ -441,11 +479,12 @@ export function TaskPanel({
   onChange: () => void
   onClose: () => void
 }) {
-  const [desc, setDesc] = useState(task.description ?? '')
-  const [title, setTitle] = useState(task.title)
-  const [estimate, setEstimate] = useState(task.estimate_seconds == null ? '' : `${Math.floor(task.estimate_seconds/3600)}:${String(Math.floor(task.estimate_seconds%3600/60)).padStart(2,'0')}`)
-  const [deadline, setDeadline] = useState(toMoscowInput(task.deadline))
-  const [tags, setTags] = useState(task.tags.join(', '))
+  const draftKey=`aion-draft-task-${task.project_id}-${task.id}`
+  const [desc,setDesc,descVersion,descDirty,resetDesc]=useDraftField(task.description??'',task.version,draftKey+'-description')
+  const [title,setTitle,titleVersion,titleDirty,resetTitle]=useDraftField(task.title,task.version,draftKey+'-title')
+  const [estimate,setEstimate,estimateVersion,estimateDirty,resetEstimate]=useDraftField(task.estimate_seconds == null ? '' : `${Math.floor(task.estimate_seconds/3600)}:${String(Math.floor(task.estimate_seconds%3600/60)).padStart(2,'0')}`,task.version,draftKey+'-estimate')
+  const [deadline,setDeadline,deadlineVersion,deadlineDirty,resetDeadline]=useDraftField(toMoscowInput(task.deadline),task.version,draftKey+'-deadline')
+  const [tags,setTags,tagsVersion,tagsDirty,resetTags]=useDraftField(task.tags.join(', '),task.version,draftKey+'-tags')
   const [saved, setSaved] = useState('')
   const [historyTick, setHistoryTick] = useState(0)
   const [checkText, setCheckText] = useState('')
@@ -460,6 +499,8 @@ export function TaskPanel({
     [task.id, historyTick],
   )
   const running = task.timer?.state === 'running'
+  const liveSeconds = useTimerSeconds(task.timer)
+  const close=()=>{if((titleDirty||descDirty||estimateDirty||deadlineDirty||tagsDirty)&&!confirm('Есть несохранённые изменения. Закрыть карточку? Черновик сохранится в этой вкладке.'))return;onClose()}
   const subtasks = tasks.filter((t) => t.parent_id === task.id)
   const predecessors = task.predecessors
     .map((p) => ({ pred: tasks.find((t) => t.id === p.task_id), linkType: p.link_type }))
@@ -492,7 +533,7 @@ const REVERSE_LABELS: Record<string, string> = {
   }
 
   async function saveDescription() {
-    await run(() => api.patchTask(task.id, { description: desc }, task.version))
+    await run(() => api.patchTask(task.id, { description: desc }, descVersion))
   }
 
   async function setAssignees(list: number[]) {
@@ -503,15 +544,15 @@ const REVERSE_LABELS: Record<string, string> = {
 
   return (
     <div className="shared-task-panel">
-      <button className="ghost small" style={{float:'right'}} onClick={onClose}>Закрыть</button>
+      <button className="ghost small" style={{float:'right'}} onClick={close}>Закрыть</button>
       <fieldset disabled={readOnly} style={{border:0,padding:0,margin:0,minWidth:0}}>
       <div className="row" style={{ justifyContent: 'space-between' }}>
         <input
           value={title}
           onChange={(e) => setTitle(e.target.value)}
           onBlur={async () => {
-            if (title.trim() && title.trim() !== task.title) {
-              await run(() => api.patchTask(task.id, { title: title.trim() }, task.version))
+            if (titleDirty && title.trim()) {
+              await run(() => api.patchTask(task.id, { title: title.trim() }, titleVersion))
             }
           }}
           onKeyDown={(e) => {
@@ -519,7 +560,7 @@ const REVERSE_LABELS: Record<string, string> = {
           }}
           style={{ fontWeight: 600, fontSize: 16, padding: '4px 8px' }}
         />
-        {!readOnly && <button className="ghost small" onClick={onClose}>✕</button>}
+        {!readOnly && <button className="ghost small" aria-label="Закрыть карточку" onClick={close}>✕</button>}
       </div>
       <div className="row" style={{ margin: '8px 0', flexWrap: 'wrap' }}>
         <Badge kind={badgeForStatus(semantic(task) === 'done' ? 'done' : 'open')}>
@@ -530,6 +571,7 @@ const REVERSE_LABELS: Record<string, string> = {
       </div>
 
       {error && <div className="error" role="alert" style={{ margin: '8px 0' }}>{error}</div>}
+      {((titleDirty&&titleVersion!==task.version)||(descDirty&&descVersion!==task.version)||(estimateDirty&&estimateVersion!==task.version)||(deadlineDirty&&deadlineVersion!==task.version)||(tagsDirty&&tagsVersion!==task.version))&&<div className="error" role="alert">Задача обновлена. Ваш черновик сохранён; устаревшие изменения не перезапишут серверные данные. <button onClick={()=>{if(confirm('Заменить черновик актуальными значениями с сервера?')){resetTitle();resetDesc();resetEstimate();resetDeadline();resetTags()}}}>Принять актуальные значения</button></div>}
       {saved && <div role="status" className="muted">{saved}</div>}
       {(task.blocking_incidents ?? []).map(i => <div key={i.id} className="card" style={{marginTop:8,borderColor:incidentKind(i)==='purple'?'#a478e5':incidentKind(i)==='red'?'var(--error)':'var(--warn)'}}>
         <Badge kind={incidentKind(i)}>{incidentLabel(i)}</Badge> {i.level === 'red' ? 'Красный' : 'Жёлтый'} инцидент
@@ -559,6 +601,16 @@ const REVERSE_LABELS: Record<string, string> = {
           </select>
         </div>
       </div>
+
+      {(predecessors.length > 0 || reverseLinks.length > 0) && <section className="section" aria-label="Зависимости задачи">
+        <div className="section-title">Зависимости</div>
+        {predecessors.map(({pred,linkType}) => <p key={`incoming-${pred.id}`}>
+          {linkType === 'blocked_by' ? 'Заблокирована' : linkType === 'before' ? 'Выполняется до' : 'Выполняется после'}: #{pred.id} {pred.title}
+        </p>)}
+        {reverseLinks.map(({dep,linkType}) => <p key={`outgoing-${dep.id}`}>
+          {linkType === 'blocked_by' ? 'Блокирует' : linkType === 'before' ? 'Выполняется после' : 'Выполняется до'}: #{dep.id} {dep.title}
+        </p>)}
+      </section>}
 
       <div className="section">
         <div className="section-title">Описание</div>
@@ -608,20 +660,20 @@ const REVERSE_LABELS: Record<string, string> = {
             <button onClick={()=>run(async()=>{
               const value=hmToSeconds(estimate)
               if (estimate.trim() && value == null) throw new Error('Введите оценку в формате ч:мм, например 1:30')
-              await api.patchTask(task.id,{estimate_seconds:value},task.version)
+              await api.patchTask(task.id,{estimate_seconds:value},estimateVersion)
             })}>Сохранить оценку</button>
           </div>
         </Field>
         <Field label="Срок (МСК)">
           <div className="row">
             <input type="datetime-local" value={deadline} onChange={e=>setDeadline(e.target.value)}/>
-            <button onClick={()=>run(()=>api.patchTask(task.id,{deadline:fromMoscowInput(deadline)},task.version))}>Сохранить срок</button>
+            <button onClick={()=>run(()=>api.patchTask(task.id,{deadline:fromMoscowInput(deadline)},deadlineVersion))}>Сохранить срок</button>
           </div>
         </Field>
         <Field label="Теги (через запятую)">
           <div className="row">
             <input value={tags} onChange={e=>setTags(e.target.value)}/>
-            <button onClick={()=>run(()=>api.patchTask(task.id,{tags:tags.split(',').map(t=>t.trim()).filter(Boolean)},task.version))}>Сохранить теги</button>
+            <button onClick={()=>run(()=>api.patchTask(task.id,{tags:tags.split(',').map(t=>t.trim()).filter(Boolean)},tagsVersion))}>Сохранить теги</button>
           </div>
         </Field>
         <div className="row">
@@ -633,7 +685,7 @@ const REVERSE_LABELS: Record<string, string> = {
             </>
           )}
           <span className="mono" style={{ color: running ? 'var(--ok)' : undefined }}>
-            {fmt(task.timer?.total_seconds ?? 0)}
+            {fmt(liveSeconds)}
           </span>
           {task.estimate_seconds != null && (
             <span className="muted" style={{ fontSize: 12 }}>

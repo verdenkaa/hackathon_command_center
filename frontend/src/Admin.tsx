@@ -140,35 +140,40 @@ function Users() {
   )
 }
 
-function CreateUser({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
+export function CreateUser({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
   const [login, setLogin] = useState('')
   const [password, setPassword] = useState('')
   const [name, setName] = useState('')
   const [telegram, setTelegram] = useState('')
   const [error, setError] = useState('')
+  const [busy,setBusy]=useState(false),[showPassword,setShowPassword]=useState(false)
 
   async function submit() {
+    if(busy)return
+    if(!login.trim()||!password||!name.trim()){setError('Укажите логин, пароль и имя');return}
+    setBusy(true)
     setError('')
     try {
       await api.createUser({
-        login, password, display_name: name, telegram_username: telegram || null,
+        login:login.trim(), password, display_name: name.trim(), telegram_username: telegram || null,
       })
       onCreated()
     } catch (e) {
       setError((e as Error).message)
-    }
+    } finally {setBusy(false)}
   }
 
   return (
     <Modal title="Новый пользователь" onClose={onClose}>
       <Field label="Логин *"><input value={login} onChange={(e) => setLogin(e.target.value)} /></Field>
-      <Field label="Пароль *"><input value={password} onChange={(e) => setPassword(e.target.value)} /></Field>
-      <Field label="Имя"><input value={name} onChange={(e) => setName(e.target.value)} /></Field>
+      <Field label="Пароль *"><input type={showPassword?'text':'password'} autoComplete="new-password" required value={password} onChange={(e) => setPassword(e.target.value)} /></Field>
+      <button type="button" className="small" onClick={()=>setShowPassword(!showPassword)}>{showPassword?'Скрыть пароль':'Показать пароль'}</button>
+      <Field label="Имя *"><input required value={name} onChange={(e) => setName(e.target.value)} /></Field>
       <Field label="Telegram username"><input value={telegram} onChange={(e) => setTelegram(e.target.value)} /></Field>
       {error && <div className="error">{error}</div>}
       <div className="row" style={{ justifyContent: 'flex-end', marginTop: 8 }}>
         <button onClick={onClose}>Отмена</button>
-        <button className="primary" onClick={submit} disabled={!login || !password}>Создать</button>
+        <button className="primary" onClick={submit} disabled={busy||!login.trim()||!password||!name.trim()}>{busy?'Создание…':'Создать'}</button>
       </div>
     </Modal>
   )

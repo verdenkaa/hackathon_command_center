@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api, Cascade, Incident, Me, Module, Participant, Task } from './api'
 import {useProjectUpdates} from './realtime'
+import {writeRoute} from './navigation'
 import { Badge, Field, Modal, badgeForStatus, fmtDate, useLoad, incidentKind, incidentLabel, PRIORITIES } from './ui'
 
 export function matchesSource(t:Task,assignee:string,tag:string,track:string,meId:number):boolean {
@@ -92,7 +93,7 @@ export function Incidents({ me, openIncidentId, initialIncident }: { me: Me; ope
 
       <div className="grid" style={{ gap: 8 }}>
         {list.map((i) => (
-          <div key={i.id} className="card" style={{ cursor: 'pointer', padding: 10 }} onClick={() => setSelected(i)}>
+          <div key={i.id} className="card" role="button" tabIndex={0} style={{ cursor: 'pointer', padding: 10 }} onKeyDown={e=>{if(e.key==='Enter'){setSelected(i);writeRoute({tab:'incidents',project:i.project_id,incident:i.id,task:null})}}} onClick={() => {setSelected(i);writeRoute({tab:'incidents',project:i.project_id,incident:i.id,task:null})}}>
             <div className="row">
               <Badge kind={incidentKind(i)}>{i.level === 'red' ? 'Красный' : 'Жёлтый'}</Badge>
               <Badge kind={incidentKind(i)}>{incidentLabel(i)}</Badge>

@@ -1,0 +1,19 @@
+[Unit]
+Description=Ouroboros VPS panel
+Requires=aion-ouroboros.socket
+After=aion-ouroboros.socket
+
+[Service]
+User=aion-panel
+Group=aion-panel
+SupplementaryGroups=aion-web
+WorkingDirectory=/opt/aion/current
+EnvironmentFile=/etc/aion/web.env
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/opt/aion/current/.venv/bin/uvicorn control.vps:from_env --factory --fd 3 --workers 1 --no-proxy-headers
+Restart=on-failure
+RestartSec=2
+UMask=0077
+ProtectSystem=full
+ProtectHome=true
+PrivateTmp=true

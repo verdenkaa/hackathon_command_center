@@ -1,7 +1,9 @@
 import {useCallback,useEffect,useMemo,useRef,useState,PointerEvent as ReactPointerEvent} from 'react'
 import {api,ApiError,Column,Me,Module,Participant,PlanningData,Task} from './api'
 import {TaskForm,TaskPanel} from './Board'
-import {fmtDate,parseUTC,Modal} from './ui'
+import {fmtDate,parseUTC,Modal,Field,toMoscowInput,fromMoscowInput} from './ui'
+import {useUrlFilter,writeRoute} from './navigation'
+import {useDraftField} from './editor'
 import {delta} from './PlanningPreview'
 import {useProjectUpdates} from './realtime'
 import {taskTone,TONE_LABELS,IncidentMark} from './taskVisuals'
@@ -30,20 +32,23 @@ export function packLane<T extends {start:string;planned_end:string}>(items:T[])
 }
 type Drag={kind:'move'|'resize'|'link'|'pan'|'unplaced';id:number;x:number;y:number;dx:number;dy:number;scrollLeft:number;scrollTop:number}
 
-export default function Planning({me}:{me:Me}) {
+export default function Planning({me,openTaskId}:{me:Me;openTaskId?:number|null}) {
   const [data,setData]=useState<PlanningData|null>(null)
   const [columns,setColumns]=useState<Column[]>([])
   const [participants,setParticipants]=useState<Participant[]>([])
   const [modules,setModules]=useState<Module[]>([])
   const [error,setError]=useState(''),[notice,setNotice]=useState('')
-  const [busy,setBusy]=useState(false),[query,setQuery]=useState('')
-  const [selected,setSelected]=useState<number|null>(null),[panel,setPanel]=useState(false)
+  const [busy,setBusy]=useState(false)
+  const [query,setQuery]=useUrlFilter('planq')
+  const [selected,setSelected]=useState<number|null>(openTaskId??null),[panel,setPanel]=useState(!!openTaskId)
+  const [listMode,setListMode]=useState(()=>typeof window!=='undefined'&&window.matchMedia('(max-width:700px)').matches)
+  const [trackName,setTrackName]=useState('')
   const [newTask,setNewTask]=useState(false)
   const [removeEdge,setRemoveEdge]=useState<{source:number;target:number}|null>(null)
   const [scale,setScale]=useState(80),[origin,setOrigin]=useState(()=>Math.floor(Date.now()/HOUR)*HOUR-2*HOUR)
   const [drag,setDrag]=useState<Drag|null>(null),dragRef=useRef<Drag|null>(null)
   const [tick,setTick]=useState(Date.now()),[edgeIndex,setEdgeIndex]=useState<{source:number;target:number}|null>(null)
-  const [review,setReview]=useState('all')
+  const [review,setReview]=useUrlFilter('review','all')
   const workspace=useRef<HTMLDivElement>(null),refreshPending=useRef(false)
   const viewport=useRef<HTMLDivElement>(null),ignoreClick=useRef(false),initialized=useRef(false)
   const alive=useRef(true),inFlight=useRef(false),busyRef=useRef(false)
@@ -95,12 +100,13 @@ export default function Planning({me}:{me:Me}) {
   async function command(op:string,values:Record<string,unknown>={}) {
     if(!data||busyRef.current||!editable)return
     busyRef.current=true;setBusy(true);setError('');setNotice('')
-    try {const next=await api.planCommand(data.revision,op,values);if(alive.current){setData(next);setNotice('Сохранено');return true}}
+    try {const next=await api.planCommand(data.revision,op,values);if(alive.current){setData(next);setNotice('Сохранено');if(op.startsWith('lane_'))api.modules().then(setModules).catch(e=>setError(e.message));return true}}
     catch(e){if(!(e instanceof ApiError&&e.code==='CANCELLED'))setError((e as Error).message);if(e instanceof ApiError&&e.code==='VERSION_CONFLICT'){busyRef.current=false;await load()}}
     finally{busyRef.current=false;setBusy(false);if(refreshPending.current)void load()}
   }
   function focusTask(id:number,open=true) {
     setSelected(id);setPanel(open);setEdgeIndex(null)
+    writeRoute({project:data?.project.id??null,tab:'planning',task:id,incident:null})
     const p=data?.placements.find(p=>p.task_id===id),v=viewport.current
     if(p&&v){const point=geometry.get(id)!;v.scrollTo({left:Math.max(0,point.x-LABEL-100),top:Math.max(0,point.y-v.clientHeight/2),behavior:'smooth'})}
   }
@@ -167,7 +173,7 @@ export default function Planning({me}:{me:Me}) {
       }
     }
   }
-  if(!data)return <div className="card">{error||'Загрузка планирования…'}</div>
+  if(!data)return <div className="card" role={error?'alert':'status'}>{error||'Загрузка планирования…'}{error&&<button onClick={()=>void load()}>Повторить загрузку</button>}</div>
   return <div className="planning">
       <div className="plan-heading"><div><h2>Планирование</h2><span className="muted">{data.tasks.length} задач · {data.lanes.length} треков · {editable?'редактирование':'только просмотр'}</span></div>
       <div className="row"><span className="muted" role="status">{busy?'Сохранение…':'Автосохранение'}</span>{editable&&<><button className="primary" disabled={busy} onClick={()=>setNewTask(true)}>+ Задача</button></>}</div>
@@ -175,14 +181,18 @@ export default function Planning({me}:{me:Me}) {
     {error&&<div className="error" role="alert">{error}</div>}{notice&&<span role="status" className="muted">{notice}</span>}
     {!!data.warnings?.length&&<details className="plan-limitations"><summary>Сохранено с замечаниями ({data.warnings.length})</summary><ul>{data.warnings.map((s,i)=><li key={i}>{s}</li>)}</ul></details>}
     <div className="plan-boundary-legend">МСК (UTC+3) · Начало проекта: {fmtDate(data.project.start)} · Дедлайн: {fmtDate(data.project.deadline)}</div>
+    <p className="plan-help">Стрелка A → B: задача B выполняется после A. Связь автоматически отображается в карточках обеих задач.</p>
     <div className="plan-toolbar">
+      <button className={listMode?'primary':''} onClick={()=>setListMode(true)}>Список</button><button className={!listMode?'primary':''} onClick={()=>setListMode(false)}>Диаграмма</button>
       <input aria-label="Поиск задач плана" placeholder="Найти задачу или исполнителя…" value={query} onChange={e=>setQuery(e.target.value)}/>
       <select aria-label="Проверка плана" value={review} onChange={e=>setReview(e.target.value)}><option value="all">Все задачи</option><option value="unconnected">Без связей — проверить</option><option value="risk">Блокировки и сроки</option><option value="overlaps">Пересечения исполнителей</option><option value="critical">Критическая цепочка</option></select>
       <button aria-label="Уменьшить масштаб" onClick={()=>zoom(scale/1.5)}>−</button><span className="muted">{Math.round(scale)} px/ч</span><button aria-label="Увеличить масштаб" onClick={()=>zoom(scale*1.5)}>+</button>
       <button onClick={fit}>Весь проект</button><button onClick={()=>{const v=viewport.current;if(v)v.scrollLeft=Math.max(0,(tick-origin)/HOUR*scale-(v.clientWidth-LABEL)/2)}}>Сейчас</button>
       <button disabled={!placement} onClick={()=>{if(placement){const v=viewport.current!;setOrigin(ms(placement.start)-HOUR);setScale(Math.min(320,Math.max(50,(v.clientWidth-LABEL-120)/Math.max(1,(ms(placement.planned_end)-ms(placement.start))/HOUR))));v.scrollLeft=0;focusTask(placement.task_id,false)}}}>К выбранной</button>
     </div>
-    <div ref={workspace} className={`plan-workspace ${panel&&chosen?'with-panel':''}`} onPointerMove={moveDrag} onPointerUp={stopDrag} onPointerCancel={()=>{dragRef.current=null;setDrag(null);if(refreshPending.current)void load()}}>
+    {editable&&data.lanes.length===0&&<form className="card row empty-state" onSubmit={async e=>{e.preventDefault();if(trackName.trim()&&await command('lane_create',{name:trackName.trim()}))setTrackName('')}}><label>Первый трек<input aria-label="Название первого трека" value={trackName} onChange={e=>setTrackName(e.target.value)} placeholder="Например, Разработка"/></label><button className="primary" disabled={busy||!trackName.trim()}>Создать трек</button></form>}
+    <div ref={workspace} className={`plan-workspace ${listMode?'list-mode':''} ${panel&&chosen?'with-panel':''}`} onPointerMove={moveDrag} onPointerUp={stopDrag} onPointerCancel={()=>{dragRef.current=null;setDrag(null);if(refreshPending.current)void load()}}>
+      {listMode&&<div className="schedule-list">{data.tasks.filter(t=>matching(t)&&reviewMatch(t.id)).map(t=>{const p=data.placements.find(p=>p.task_id===t.id);return <button key={t.id} className="schedule-task" onClick={()=>focusTask(t.id)}><strong>#{t.id} {t.title}</strong><span>{p?`${fmtDate(p.start)} — ${fmtDate(p.planned_end)}`:'Не размещена'} · {t.module_id?data.lanes.find(l=>l.id===t.module_id)?.name:'Без трека'}</span><span>{t.assignees.map(a=>a.display_name).join(', ')||'Без исполнителей'}</span></button>})}{!data.tasks.length&&<p>Создайте первую задачу кнопкой «+ Задача».</p>}</div>}
       <aside className="plan-backlog">
         <h3>Неразмещённые <span className="badge yellow">{data.unplaced_ids.length}</span></h3>
         {data.unplaced_ids.length===0&&<p className="muted">Все задачи размещены</p>}
@@ -235,7 +245,8 @@ export default function Planning({me}:{me:Me}) {
         </div>
       </div>
       {panel&&chosen&&<aside className="plan-task-panel"><h3>Задача</h3>
-        <TaskPanel key={`${chosen.id}-${chosen.version}`} task={chosen} tasks={data.tasks} participants={participants} modules={modules} columns={columns} isCaptain={editable} readOnly={!editable} onChange={load} onClose={()=>setPanel(false)}/>
+        {editable&&<PlacementEditor key={chosen.id} task={chosen} placement={placement} lanes={data.lanes} revision={data.revision} busy={busy} command={command}/>}
+        <TaskPanel key={chosen.id} task={chosen} tasks={data.tasks} participants={participants} modules={modules} columns={columns} isCaptain={editable} readOnly={!editable} onChange={load} onClose={()=>setPanel(false)}/>
       </aside>}
     </div>
     {drag&&['unplaced','link'].includes(drag.kind)&&<div className="plan-drag-preview" style={{left:drag.x+drag.dx+14,top:drag.y+drag.dy+14}}>{drag.kind==='link'?'Связать → ':''}{taskMap.get(drag.id)?.title}</div>}
@@ -245,6 +256,21 @@ export default function Planning({me}:{me:Me}) {
     <PlanReview data={data} participants={participants} onTask={focusTask}/>
     {newTask&&<TaskForm columns={columns} onClose={()=>setNewTask(false)} onCreated={async id=>{setNewTask(false);await load();setSelected(id);setPanel(true)}}/>}
   </div>
+}
+
+function PlacementEditor({task,placement,lanes,revision,busy,command}:{task:Task;placement:PlanningData['placements'][number]|undefined;lanes:PlanningData['lanes'];revision:number;busy:boolean;command:(op:string,values:Record<string,unknown>)=>Promise<boolean|undefined>}) {
+  const key=`aion-draft-placement-${task.project_id}-${task.id}-`
+  const [lane,setLane,laneVersion,laneDirty,resetLane]=useDraftField(String(placement?.lane_id??lanes[0]?.id??''),revision,key+'lane')
+  const [start,setStart,startVersion,startDirty,resetStart]=useDraftField(toMoscowInput(placement?.start??new Date(snapTime(Date.now()+STEP)).toISOString()),revision,key+'start')
+  const [duration,setDuration,durationVersion,durationDirty,resetDuration]=useDraftField(String((task.estimate_seconds??3600)/60),revision,key+'duration')
+  const expected=Math.min(laneDirty?laneVersion:revision,startDirty?startVersion:revision,durationDirty?durationVersion:revision)
+  return <form className="plan-placement-form" onSubmit={e=>{e.preventDefault();if(lane&&start)void command('place',{task_id:task.id,lane_id:Number(lane),start:fromMoscowInput(start),estimate_seconds:Math.round(Number(duration)*60),revision:expected})}}>
+    {expected!==revision&&<p role="alert">План обновлён. Черновик сохранён. <button type="button" onClick={()=>{if(confirm('Заменить черновик актуальным размещением?')){resetLane();resetStart();resetDuration()}}}>Принять актуальное размещение</button></p>}
+    <Field label="Трек плана"><select value={lane} onChange={e=>setLane(e.target.value)} required><option value="">Выберите трек</option>{lanes.map(l=><option key={l.id} value={l.id}>{l.name}</option>)}</select></Field>
+    <Field label="Начало задачи (МСК)"><input type="datetime-local" value={start} onChange={e=>setStart(e.target.value)} required/></Field>
+    <Field label="Длительность (минуты)"><input type="number" min="15" max="35791394" value={duration} onChange={e=>setDuration(e.target.value)} required/></Field>
+    <button className="primary" disabled={busy||!lane}>Сохранить размещение</button>
+  </form>
 }
 
 function PlanReview({data,participants,onTask}:{data:PlanningData;participants:Participant[];onTask:(id:number)=>void}) {

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { api, Analytics as AnalyticsData, Me, SummaryTask, Situation } from './api'
 import { useProjectUpdates } from './realtime'
 import { SituationCard } from './Situations'
+import {download,summaryMarkdown,tasksCsv} from './export'
 import { Badge, badgeForStatus, fmt, fmtDuration, fmtDate, useLoad, incidentKind, incidentLabel } from './ui'
 
 export function Analytics({ me: _me, onOpenTask, onOpenIncident, onPlanning }: {
@@ -20,9 +21,12 @@ export function Analytics({ me: _me, onOpenTask, onOpenIncident, onPlanning }: {
       <div className="row analytics-heading">
         <h3>Аналитика</h3><span className="muted">Последнее успешное обновление: {fmtDate(s.generated_at)} МСК</span>
         <button className="small" onClick={reload}>Обновить</button>
+        <button className="small" onClick={()=>download('aion-tasks.csv',tasksCsv(s.tasks),'text/csv;charset=utf-8')}>Экспорт задач CSV</button>
+        <button className="small" onClick={async()=>download('aion-summary.md',summaryMarkdown(data,await api.incidents()),'text/markdown;charset=utf-8')}>Итоги Markdown</button>
       </div>
       {error&&<div className="error" role="alert">Не удалось обновить: {error}. Показан последний успешный снимок; время и таймеры относятся к нему.</div>}
       <AnalyticsMetrics data={data}/>
+      {!!s.situations.length&&<section className="card"><h3>Сейчас требует внимания</h3><div className="attention-grid">{s.situations.slice(0,3).map(item=><SituationCard key={item.id} item={item} onOpenTask={onOpenTask} onOpenIncident={onOpenIncident} onPlanning={onPlanning}/>)}</div></section>}
       <button className="small" onClick={onPlanning}>Открыть планирование</button>
       <OperationalSections summary={s} onOpenTask={onOpenTask} onOpenIncident={onOpenIncident} onPlanning={onPlanning}/>
       <details className="card"><summary>Подробности по времени</summary>

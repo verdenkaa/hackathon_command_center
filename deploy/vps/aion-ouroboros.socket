@@ -1,0 +1,12 @@
+[Unit]
+Description=Private socket for the Ouroboros VPS panel
+
+[Socket]
+ListenStream=/run/aion-ouroboros.sock
+SocketUser=caddy
+SocketGroup=caddy
+SocketMode=0600
+RemoveOnStop=true
+
+[Install]
+WantedBy=sockets.target

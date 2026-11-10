@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ouroboros · Aion VPS</title>
+  <link rel="stylesheet" href="/static/vps.css">
+  <script src="/static/vps.js" defer></script>
+</head>
+<body>
+  <main>
+    <header><p>Ouroboros Daemon</p><h1>Управление Aion</h1></header>
+    <section aria-labelledby="status-title">
+      <h2 id="status-title">Состояние приложения</h2>
+      <p id="state" role="status">Проверяем Aion…</p>
+      <p id="details"></p>
+      <div class="actions">
+        <button data-action="start" disabled>Запустить</button>
+        <button data-action="stop" disabled>Остановить</button>
+        <button data-action="restart" disabled>Перезапустить</button>
+        <a id="aion" hidden>Открыть Aion</a>
+      </div>
+      <p id="message" role="status"></p>
+    </section>
+    <section aria-labelledby="resources-title">
+      <h2 id="resources-title">Ресурсы VPS</h2>
+      <dl>
+        <div><dt>Средняя нагрузка за минуту</dt><dd id="load">—</dd></div>
+        <div><dt>Занято памяти</dt><dd id="memory">—</dd></div>
+        <div><dt>Свободно на разделе /var/lib</dt><dd id="disk">—</dd></div>
+      </dl>
+      <p id="checked"></p>
+    </section>
+  </main>
+</body>
+</html>

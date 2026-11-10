@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 from pathlib import Path
+from urllib.parse import urlsplit
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Корень проекта — на два уровня выше этого файла (backend/app -> backend -> root).
@@ -25,6 +27,7 @@ class Settings(BaseSettings):
     app_static_dir: str = ""
     app_installation_id: str = ""
     app_project_name: str = "Aion"
+    app_public_url: str = ""
     app_data_dir: str = str(PROJECT_ROOT / "data")
     database_url: str = ""
 
@@ -38,6 +41,17 @@ class Settings(BaseSettings):
     telegram_chat_id: str = ""
     google_drive_folder_id: str = ""
     fxtunnel_token: str = ""
+
+    @field_validator("app_public_url")
+    @classmethod
+    def validate_public_url(cls, value: str) -> str:
+        if not value:
+            return value
+        url = urlsplit(value)
+        if (url.scheme != "https" or not url.hostname or url.username is not None
+                or url.path not in {"", "/"} or url.query or url.fragment):
+            raise ValueError("APP_PUBLIC_URL должен содержать HTTPS-адрес Aion без пути")
+        return value.rstrip("/")
 
     def secret_value(self, name: str) -> str:
         if name not in {"operator", "bootstrap_password", "telegram"} or not self.app_secrets_dir:

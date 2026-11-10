@@ -280,7 +280,18 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(path: string, init?: RequestInit, previewAttempt=0): Promise<T> {
+const pendingMutations=new Map<string,{body:unknown;promise:Promise<unknown>}>()
+function request<T>(path:string,init?:RequestInit):Promise<T> {
+  const mutation=init?.method&&!['GET','HEAD','OPTIONS'].includes(init.method.toUpperCase())
+  if(!mutation)return performRequest<T>(path,init)
+  const key=init!.method+' '+path,previous=pendingMutations.get(key)
+  if(previous)return previous.body===init?.body?previous.promise as Promise<T>:Promise.reject(new ApiError(409,'REQUEST_BUSY','Дождитесь завершения предыдущего сохранения.'))
+  const promise=performRequest<T>(path,init).finally(()=>{pendingMutations.delete(key);window.dispatchEvent(new CustomEvent('aion-saving',{detail:pendingMutations.size}))})
+  pendingMutations.set(key,{body:init?.body,promise})
+  window.dispatchEvent(new CustomEvent('aion-saving',{detail:pendingMutations.size}))
+  return promise
+}
+async function performRequest<T>(path: string, init?: RequestInit, previewAttempt=0): Promise<T> {
   const mutation=!!init?.method && !['GET','HEAD','OPTIONS'].includes(init.method.toUpperCase())
   const connectionLost=():never=>{
     if(mutation)window.dispatchEvent(new Event('project-updated'))
@@ -306,7 +317,7 @@ async function request<T>(path: string, init?: RequestInit, previewAttempt=0): P
       if (code === 'VALIDATION_ERROR' && body?.error?.details?.errors?.[0]?.msg) message = body.error.details.errors[0].msg.replace(/^Value error, /,'')
       if(code==='PLANNING_PREVIEW' && previewAttempt<3) {
         const preview=body.error.details as Preview
-        if(await approvePlan(preview)) return request<T>(path,{...init,headers:{'Content-Type':'application/json',...init?.headers,'X-Planning-Confirm':preview.token}},previewAttempt+1)
+        if(await approvePlan(preview)) return performRequest<T>(path,{...init,headers:{'Content-Type':'application/json',...init?.headers,'X-Planning-Confirm':preview.token}},previewAttempt+1)
         throw new ApiError(409,'CANCELLED','Изменение отменено')
       }
     } catch (e) {
@@ -318,12 +329,20 @@ async function request<T>(path: string, init?: RequestInit, previewAttempt=0): P
   }
   let body:T
   try { body=await res.json() } catch { return connectionLost() }
+  try {
+    if(['/api/v1/auth/login','/api/v1/auth/me'].includes(path)){
+      const id=String((body as {id:number}).id),previous=sessionStorage.getItem('aion-draft-owner')
+      if(previous&&previous!==id)for(const key of Object.keys(sessionStorage))if(key.startsWith('aion-draft-'))sessionStorage.removeItem(key)
+      sessionStorage.setItem('aion-draft-owner',id)
+    }
+    if(path==='/api/v1/auth/logout')for(const key of Object.keys(sessionStorage))if(key.startsWith('aion-draft-'))sessionStorage.removeItem(key)
+  }catch{}
   if(init?.method && !['GET','HEAD'].includes(init.method))window.dispatchEvent(new Event('project-updated'))
   return body
 }
 
 export function currentProject(): number {
-  const id = Number(localStorage.getItem('hcc-project') ?? 1)
+  const id = Number(typeof localStorage==='undefined'?1:localStorage.getItem('hcc-project') ?? 1)
   return Number.isFinite(id) && id > 0 ? id : 1
 }
 

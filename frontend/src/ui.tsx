@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useRef, useState } from 'react'
 
 export function useLoad<T>(fn: () => Promise<T>, deps: unknown[] = []): [T | null, string, () => void] {
   const [data, setData] = useState<T | null>(null)
@@ -81,12 +81,34 @@ export function incidentLabel(i: {level:string;status:string}): string {
 }
 
 export function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
+  const ref=useRef<HTMLDivElement>(null),dirty=useRef(false),latestClose=useRef(onClose)
+  latestClose.current=onClose
+  const titleId=useId()
+  const close=()=>{if(dirty.current&&!window.confirm('Есть несохранённые данные. Закрыть окно?'))return;latestClose.current()}
+  const latestRequest=useRef(close);latestRequest.current=close
+  useEffect(()=>{
+    const previous=document.activeElement as HTMLElement|null
+    const overflow=document.body.style.overflow;document.body.style.overflow='hidden'
+    const focusable=()=>Array.from(ref.current?.querySelectorAll<HTMLElement>('button:not(:disabled),input:not(:disabled),textarea:not(:disabled),select:not(:disabled),[tabindex="0"]')??[]).filter(el=>el.offsetParent!==null)
+    if(!ref.current?.contains(document.activeElement))focusable()[0]?.focus()
+    const key=(event:KeyboardEvent)=>{
+      const dialogs=document.querySelectorAll('[role="dialog"]');if(dialogs[dialogs.length-1]!==ref.current)return
+      if(event.key==='Escape'){event.preventDefault();event.stopPropagation();latestRequest.current()}
+      if(event.key==='Tab'){
+        const elements=focusable(),first=elements[0],last=elements[elements.length-1]
+        if(event.shiftKey&&(document.activeElement===first||!ref.current?.contains(document.activeElement))){event.preventDefault();last?.focus()}
+        else if(!event.shiftKey&&(document.activeElement===last||!ref.current?.contains(document.activeElement))){event.preventDefault();first?.focus()}
+      }
+    }
+    document.addEventListener('keydown',key,true)
+    return()=>{document.removeEventListener('keydown',key,true);document.body.style.overflow=overflow;previous?.focus()}
+  },[])
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
+    <div className="modal-backdrop" onClick={close}>
+      <div className="modal" ref={ref} role="dialog" aria-modal="true" aria-labelledby={titleId} onInputCapture={()=>{dirty.current=true}} onChangeCapture={()=>{dirty.current=true}} onClick={(e) => e.stopPropagation()}>
         <div className="modal-head">
-          <span>{title}</span>
-          <button className="ghost small" onClick={onClose}>✕</button>
+          <span id={titleId}>{title}</span>
+          <button type="button" className="ghost small" aria-label="Закрыть окно" onClick={close}>✕</button>
         </div>
         <div className="modal-body">{children}</div>
       </div>

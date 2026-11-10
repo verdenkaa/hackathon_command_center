@@ -2,6 +2,24 @@ from tests.helpers import login
 from tests.test_planning import task, lane, place, command, row
 
 
+def test_planning_arrow_is_shared_with_task_without_blocking_start(client):
+    login(client)
+    source, target = task(client, 'Source'), task(client, 'Dependent')
+    response = command(client, 'link', source_id=source['id'], target_id=target['id'])
+    assert response.status_code == 200, response.text
+    plan = response.json()
+    edge = next(edge for edge in plan['edges'] if edge['target'] == target['id'])
+    assert edge['source'] == source['id'] and edge['type'] == 'after'
+    dependency = {'task_id': source['id'], 'link_type': 'after'}
+    assert next(t for t in plan['tasks'] if t['id'] == target['id'])['predecessors'] == [dependency]
+    fresh = client.get(f"/api/v1/tasks/{target['id']}").json()
+    assert fresh['predecessors'] == [dependency]
+    assert client.post(f"/api/v1/tasks/{target['id']}/move", json={
+        'version': fresh['version'], 'column_key': 'in_progress',
+    }).status_code == 200
+    assert client.post(f"/api/v1/tasks/{target['id']}/timer/start").status_code == 200
+
+
 def test_soft_link_can_overlap_but_blocker_cannot_start(client):
     login(client)
     a, b = task(client, 'A'), task(client, 'B')

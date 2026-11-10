@@ -1,0 +1,22 @@
+@AION_HOST@ {
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+	}
+	reverse_proxy unix//run/aion-web/aion.sock {
+		header_up Host @AION_HOST@
+	}
+}
+
+@OUROBOROS_HOST@ {
+	basic_auth {
+		operator @PANEL_HASH@
+	}
+	header Strict-Transport-Security "max-age=31536000"
+	reverse_proxy unix//run/aion-ouroboros.sock {
+		header_up Host @OUROBOROS_HOST@
+		header_up -Authorization
+		header_up X-Ouroboros-Operator {http.auth.user.id}
+	}
+}

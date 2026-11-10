@@ -1,0 +1,1 @@
+aion-panel ALL=(root) NOPASSWD: /usr/bin/systemctl --no-block start aion-web.service, /usr/bin/systemctl --no-block stop aion-web.service, /usr/bin/systemctl --no-block restart aion-web.service

@@ -1,6 +1,9 @@
 """Задачи: CRUD, перемещение, исполнители, зависимости, чек-лист."""
 from __future__ import annotations
 
+import hashlib
+import json
+
 from fastapi import APIRouter, Depends, Query, Header
 from sqlalchemy.orm import Session
 
@@ -17,6 +20,7 @@ from app.db.models import (
 )
 from app.deps import ensure_project_active, get_db, require_member
 from app.schemas import (
+    AssigneeIn,
     AssigneesSet,
     ChecklistCreate,
     ChecklistItemOut,
@@ -31,7 +35,7 @@ from app.services.audit import write_audit
 from app.services.history import history_text as _history_text
 from app.services.board import get_column_by_key
 from app.services.notifications import notify_users
-from app.services.tasks import serialize_task
+from app.services.tasks import serialize_task, serialize_tasks
 from app.services import planning
 from app.timeutil import to_naive_utc
 from app.cascade_schemas import CascadeOut
@@ -120,7 +124,7 @@ def list_tasks(
     if tag is not None:
         tasks = [t for t in tasks if tag in (t.tags or [])]
 
-    return [serialize_task(db, t) for t in tasks]
+    return serialize_tasks(db, tasks)
 
 
 @router.post("/projects/{project_id}/tasks", response_model=TaskOut)
@@ -132,6 +136,21 @@ def create_task(
 ) -> TaskOut:
     ensure_project_active(db, project_id)
     plan_change = planning.begin(db, project_id)
+    fingerprint = hashlib.sha256(json.dumps(body.model_dump(mode='json', exclude={'creation_key'}),
+                                             sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+    if body.creation_key:
+        previous = db.query(AuditEntry).filter(
+            AuditEntry.project_id == project_id, AuditEntry.actor_id == user.id,
+            AuditEntry.action == 'task.created',
+            AuditEntry.data['creation_key'].as_string() == str(body.creation_key),
+        ).first()
+        if previous:
+            if previous.data.get('creation_hash') != fingerprint:
+                raise api_error(409, 'IDEMPOTENCY_CONFLICT', 'Эта попытка уже создала задачу. Откройте её перед изменением данных.')
+            previous_id = int(previous.entity_id)
+            db.rollback()
+            return serialize_task(db, _get_task(db, previous_id))
+    _validate_assignees(db, project_id, body.assignees)
     if body.column_key == 'backlog' and not db.query(BoardColumn).filter_by(project_id=project_id, key='backlog').first():
         column = db.query(BoardColumn).filter(BoardColumn.project_id == project_id, BoardColumn.semantic.notin_(['done', 'trash'])).order_by(BoardColumn.position).first()
         column = column or db.query(BoardColumn).filter_by(project_id=project_id).order_by(BoardColumn.position).first()
@@ -160,10 +179,13 @@ def create_task(
     )
     db.add(task)
     db.flush()
+    _assign_users(db, task, body.assignees, user, increment_version=False)
     planning.assign_track(db, task)
     planning.finish(db, plan_change)
     write_audit(db, action="task.created", actor_id=user.id, project_id=project_id, entity_type="task", entity_id=task.id,
-                data={"title": task.title, 'column_semantic':column.semantic})
+                data={"title": task.title, 'column_semantic':column.semantic,
+                      'creation_key': str(body.creation_key) if body.creation_key else None,
+                      'creation_hash': fingerprint})
     db.commit()
     db.refresh(task)
     return serialize_task(db, task)
@@ -297,22 +319,39 @@ def set_assignees(
 ) -> TaskOut:
     task = _get_task(db, task_id)
     ensure_project_active(db, task.project_id)
-    primaries = [a for a in body.assignees if a.is_primary]
-    if body.assignees and len(primaries) != 1:
+    _validate_assignees(db, task.project_id, body.assignees)
+    _assign_users(db, task, body.assignees, user)
+    db.commit()
+    db.refresh(task)
+    return serialize_task(db, task)
+
+
+def _validate_assignees(db: Session, project_id: int, assignees: list[AssigneeIn]) -> None:
+    primaries = [a for a in assignees if a.is_primary]
+    if assignees and len(primaries) != 1:
         raise api_error(422, "VALIDATION_ERROR", "Должен быть ровно один основной исполнитель")
-    for a in body.assignees:
-        from app.deps import project_member_ids
-        if a.user_id not in project_member_ids(db, task.project_id):
+    if len({a.user_id for a in assignees}) != len(assignees):
+        raise api_error(422, 'VALIDATION_ERROR', 'Исполнитель указан повторно')
+    from app.deps import project_member_ids
+    members = set(project_member_ids(db, project_id))
+    for a in assignees:
+        if a.user_id not in members:
             raise api_error(422, "VALIDATION_ERROR", f"Пользователь {a.user_id} не участник проекта")
 
-    previous_ids = {a.user_id for a in db.query(TaskAssignee).filter_by(task_id=task_id)}
-    db.query(TaskAssignee).filter(TaskAssignee.task_id == task_id).delete()
-    for a in body.assignees:
-        db.add(TaskAssignee(task_id=task_id, user_id=a.user_id, is_primary=a.is_primary))
-    task.version += 1
+
+def _assign_users(db: Session, task: Task, assignees: list[AssigneeIn], user: User,
+                  *, increment_version: bool = True) -> None:
+    previous_ids = {a.user_id for a in db.query(TaskAssignee).filter_by(task_id=task.id)}
+    db.query(TaskAssignee).filter(TaskAssignee.task_id == task.id).delete()
+    for a in assignees:
+        db.add(TaskAssignee(task_id=task.id, user_id=a.user_id, is_primary=a.is_primary))
+    if increment_version:
+        task.version += 1
+    if not assignees and not previous_ids:
+        return
     write_audit(db, action="task.assignees_set", actor_id=user.id, project_id=task.project_id, entity_type="task", entity_id=task.id,
-                data={"user_ids": [a.user_id for a in body.assignees]})
-    assigned_ids = [a.user_id for a in body.assignees if a.user_id not in previous_ids]
+                data={"user_ids": [a.user_id for a in assignees]})
+    assigned_ids = [a.user_id for a in assignees if a.user_id not in previous_ids]
     if assigned_ids:
         names = [db.get(User, uid).telegram_username for uid in assigned_ids]
         notify_users(
@@ -324,9 +363,6 @@ def set_assignees(
             telegram_text=f"📌 Назначена задача: {task.title}",
             mention_usernames=[n for n in names if n],
         )
-    db.commit()
-    db.refresh(task)
-    return serialize_task(db, task)
 
 
 @router.post("/tasks/{task_id}/dependencies", response_model=TaskOut)

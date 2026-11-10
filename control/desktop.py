@@ -82,7 +82,7 @@ def run_desktop(root: Path, token: str, *, hidden: bool = False, resume: bool = 
 
         def open_external(self, url: str) -> None:
             parsed = urlparse(url)
-            if (parsed.scheme == 'https' and parsed.hostname in {'fxtun.ru','docs.docker.com','learn.microsoft.com'}) or url == 'http://127.0.0.1:8000' or url == manager.tunnel.current_url:
+            if (parsed.scheme == 'https' and parsed.hostname in {'fxtun.dev','docs.docker.com','learn.microsoft.com'}) or url == 'http://127.0.0.1:8000' or url == manager.tunnel.current_url:
                 webbrowser.open(url)
 
     window = webview.create_window('Ouroboros Daemon',

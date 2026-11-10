@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from typing import Literal
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -225,6 +226,8 @@ class TimerOut(BaseModel):
 
 
 class TaskCreate(BaseModel):
+    creation_key: UUID | None = None
+    assignees: list[AssigneeIn] = Field(default_factory=list)
     title: str = Field(min_length=1, max_length=255)
     description: str | None = None
     module_id: int | None = None

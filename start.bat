@@ -13,9 +13,9 @@ if not exist "%PY%" (
 if errorlevel 1 goto :failed
 pushd "%ROOT%"
 "%PY%" -m control
+set "LAUNCH_EXIT=%ERRORLEVEL%"
 popd
-endlocal
-exit /b 0
+endlocal & exit /b %LAUNCH_EXIT%
 :failed
 echo Dashboard setup failed. Check Python 3.12+ and internet access.
 pause

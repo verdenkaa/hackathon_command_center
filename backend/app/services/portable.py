@@ -17,10 +17,12 @@ _local_operation_lock = RLock()
 
 
 def current_public_url() -> str:
+    if settings.app_public_url:
+        return settings.app_public_url
     try:
         value = json.loads((settings.data_dir / '.public-url.json').read_text())
         url = value.get('url', '')
-        return url if value.get('expires', 0) > time.time() and re.fullmatch(r'https://[a-z0-9-]+\.fxtun\.ru', url) else ''
+        return url if value.get('expires', 0) > time.time() and re.fullmatch(r'https://[a-z0-9-]+\.fxtun\.(?:dev|ru)', url) else ''
     except (OSError, ValueError, TypeError):
         return ''
 

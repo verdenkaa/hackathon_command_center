@@ -5,9 +5,12 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from threading import Event
 from contextlib import nullcontext
+from urllib.parse import urlsplit
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from app.api import (
     admin,
@@ -184,6 +187,17 @@ def create_app() -> FastAPI:
                 return await call_next(request)
             finally:
                 lock.__exit__(None, None, None)
+    if settings.app_public_url:
+        app.add_middleware(TrustedHostMiddleware, allowed_hosts=[urlsplit(settings.app_public_url).hostname])
+
+        @app.middleware("http")
+        async def check_public_origin(request, call_next):
+            if request.method not in {"GET", "HEAD", "OPTIONS"} and request.headers.get("origin") != settings.app_public_url:
+                return JSONResponse(
+                    {"error": {"code": "ORIGIN_MISMATCH", "message": "Откройте Aion по его HTTPS-адресу"}},
+                    status_code=403,
+                )
+            return await call_next(request)
     register_error_handlers(app)
     app.add_middleware(
         CORSMiddleware,

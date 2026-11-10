@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from app.api.errors import api_error
 from app.db.models import (BoardColumn, PlanningBaseline, Module as PlanningLane, PlanningState, Project,
                            Task, TaskAssignee, TaskDependency, TaskPlacement, Incident, IncidentTarget)
-from app.services.tasks import serialize_task
+from app.services.tasks import serialize_tasks
 from app.services.dependencies import pending_blockers
 from app.timeutil import utcnow
 
@@ -277,7 +277,7 @@ def read(db: Session, project_id: int) -> dict[str, Any]:
                                                                'title':incident.title, 'level':incident.level, 'status':incident.status})
     return {'revision':state.revision if state else 0, 'project':{'id':project.id,'name':project.name,'start':project.start_msk,'deadline':project.deadline_msk,'state':project.state},
             'lanes':[{'id':l.id,'name':l.name,'position':l.position,'incidents':track_incidents.get(l.id, [])} for l in g['lanes']],
-            'tasks':[serialize_task(db,t).model_dump(mode='json') for t in g['tasks'].values()], 'placements':placements, 'edges':g['edges'],
+            'tasks':[t.model_dump(mode='json') for t in serialize_tasks(db,list(g['tasks'].values()))], 'placements':placements, 'edges':g['edges'],
             'unplaced_ids':sorted(unplaced), 'unconnected_ids':sorted(set(g['tasks'])-linked), 'overlaps':overlaps,
             'baseline':{'id':baseline.id,'created_at':baseline.created_at} if baseline else None, 'baseline_count':len(baselines),
             'forecast':{'finish':latest, 'deadline_delta_seconds':int((datetime.fromisoformat(latest)-project.deadline_msk).total_seconds()) if latest and project.deadline_msk else None,

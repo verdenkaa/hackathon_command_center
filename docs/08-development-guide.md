@@ -6,7 +6,7 @@
 
 ```powershell
 python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r backend/requirements.lock
+.\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
 npm --prefix frontend ci
 npm --prefix control/tests ci
 
@@ -49,6 +49,8 @@ Lifespan backend выполняет миграции и bootstrap автомат
 Из корня: `.\.venv\Scripts\python.exe -m pytest control/tests -q`.
 Затем `npm --prefix frontend test`, `npm --prefix frontend run build`,
 `npm --prefix control/tests test` и `git diff --check`.
+
+Браузерные регрессии: после `npm --prefix frontend run build` установите Chromium командой `npm --prefix frontend exec -- playwright install chromium`, затем выполните `npm --prefix frontend run test:e2e`. Python из `.venv` должен быть первым в PATH; на Windows можно задать `$env:PATH=(Resolve-Path .venv/Scripts).Path+';'+$env:PATH`. Для установленного Edge задайте `$env:AION_BROWSER='msedge'`. Playwright сам поднимает порт 8001 с новой временной базой в `.tmp` и останавливает её после проверки; работающий сервер на этом порту не переиспользуется. Проверяются конкурентное редактирование, потеря ответа создания, черновики, ошибки, история браузера и мобильное размещение. CI запускает backend, frontend, сборку и браузерные тесты; трассы неуспешных браузерных проверок сохраняются как артефакт.
 
 Запускайте Python-наборы последовательно: backend-фикстуры используют общую тестовую папку. Тесты не требуют настоящих токенов; провайдеры подменяются. Некоторые проверки запускают дочерние процессы, поэтому нужны права на создание/удаление собственных временных файлов. При отказе прав не расширяйте очистку на рабочие данные.
 

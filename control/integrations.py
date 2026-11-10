@@ -11,6 +11,8 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+FXTUNNEL_SERVER = 'tunnel.fxtun.dev:443'
+
 
 def tunnel_binary() -> str | None:
     binary = shutil.which('fxtunnel')
@@ -31,7 +33,8 @@ def validate(name: str, key: str) -> tuple[str, str]:
         if not binary:
             return 'unknown', 'Ключ сохранён; установите CLI fxTunnel для проверки'
         try:
-            result = subprocess.run([binary, 'domains'], env={**os.environ, 'FXTUNNEL_TOKEN': key},
+            result = subprocess.run([binary, 'domains', 'list', '--server', FXTUNNEL_SERVER],
+                env={**os.environ, 'FXTUNNEL_TOKEN': key},
                 capture_output=True, timeout=20,
                 creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
             if result.returncode == 0:
